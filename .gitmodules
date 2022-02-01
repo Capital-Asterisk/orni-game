@@ -1,0 +1,9 @@
+[submodule "3rdparty/glm"]
+	path = 3rdparty/glm
+	url = https://github.com/g-truc/glm.git
+[submodule "3rdparty/longeronpp"]
+	path = 3rdparty/longeronpp
+	url = https://github.com/Capital-Asterisk/longeronpp.git
+[submodule "3rdparty/tinygltf"]
+	path = 3rdparty/tinygltf
+	url = https://github.com/syoyo/tinygltf.git

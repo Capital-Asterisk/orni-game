@@ -27,6 +27,12 @@ if (NOT raylib_FOUND) # If there's none, fetch and build raylib
 
 endif()
 
+set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF)
+
+add_subdirectory("3rdparty/glm")
+add_subdirectory("3rdparty/tinygltf")
+add_subdirectory("3rdparty/longeronpp")
+
 project(ornigame)
 
 file (GLOB_RECURSE C_FILES src/*.cpp)
@@ -34,7 +40,7 @@ file (GLOB_RECURSE H_FILES src/*.h)
 set (SOURCE_FILES ${C_FILES} ${H_FILES})
 add_executable(ornigame ${C_FILES})
 
-target_link_libraries(ornigame raylib)
+target_link_libraries(ornigame raylib longeron tinygltf glm)
 
 if (EMSCRIPTEN)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_GLFW=3 -s ASSERTIONS=1 -s WASM=1 -s ASYNCIFY")
