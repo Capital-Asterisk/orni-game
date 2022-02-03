@@ -28,6 +28,7 @@ if (NOT raylib_FOUND) # If there's none, fetch and build raylib
 endif()
 
 set(TINYGLTF_BUILD_LOADER_EXAMPLE OFF)
+add_definitions(-DTINYGLTF_NO_STB_IMAGE -DTINYGLTF_NO_STB_IMAGE_WRITE)
 
 add_subdirectory("3rdparty/glm")
 add_subdirectory("3rdparty/tinygltf")
