@@ -44,6 +44,8 @@ add_executable(ornigame ${C_FILES})
 target_link_libraries(ornigame raylib longeron tinygltf glm)
 
 if (EMSCRIPTEN)
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_GLFW=3 -s ASSERTIONS=1 -s WASM=1 -s ASYNCIFY")
+
+    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s USE_GLFW=3 -s ASSERTIONS=1 -s WASM=1 -s ASYNCIFY --preload-file ${PROJECT_SOURCE_DIR}/bin@./")
     set(CMAKE_EXECUTABLE_SUFFIX ".html")
 endif ()
