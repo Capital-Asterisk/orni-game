@@ -30,7 +30,7 @@ int main(int argc, char** argv)
     SetConfigFlags(FLAG_WINDOW_TRANSPARENT);
     InitWindow(screenWidth, screenHeight, "Nice");
 
-    g_sceneFunc = orni::gen_test_scene_a();
+    g_sceneFunc = orni::gen_test_scene_b();
 
 #if defined(PLATFORM_WEB)
     emscripten_set_main_loop(update_draw_frame, 0, 1);

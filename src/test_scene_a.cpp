@@ -21,7 +21,7 @@ struct LazyAnimMesh
     std::vector<glm::vec3> m_Nrm;
 };
 
-struct TestScene
+struct TestSceneA
 {
     Camera3D m_camera;
 
@@ -34,12 +34,15 @@ struct TestScene
     Material m_mat;
 
     RenderTexture2D m_ui;
+
+    float m_time = 0.0f;
 };
 
-float t = 0.0f;
 
-static void draw_scene(TestScene &rScene)
+static void draw_scene(TestSceneA &rScene)
 {
+    auto &t = rScene.m_time;
+
     t += GetFrameTime();
 
     rScene.m_camera.position = Vector3{ std::sin(t * 3.14159f * 0.1f) * 8.0f, 5.0f, std::cos(t * 3.14159f * 0.1f) * 8.0f };
@@ -111,8 +114,8 @@ static void draw_scene(TestScene &rScene)
 
 SceneFunc_t orni::gen_test_scene_a()
 {
-    std::shared_ptr<TestScene> pScene = std::make_shared<TestScene>();
-    TestScene &rScene = *pScene;
+    std::shared_ptr<TestSceneA> pScene = std::make_shared<TestSceneA>();
+    TestSceneA &rScene = *pScene;
 
     std::string err;
     std::string warn;

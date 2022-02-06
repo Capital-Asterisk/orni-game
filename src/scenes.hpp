@@ -11,4 +11,6 @@ using SceneFunc_t = std::function<void(orni::GameState&)>;
 
 SceneFunc_t gen_test_scene_a();
 
+SceneFunc_t gen_test_scene_b();
+
 }
