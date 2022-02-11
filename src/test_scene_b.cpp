@@ -91,58 +91,62 @@ void apply_baits(FrogDyn &rDyn)
     for (int i = 0; i < rDyn.m_baits.size(); i ++)
     {
         auto const &rBait = rDyn.m_baits[i];
-        glm::vec3 posA, velA, posB, velB;
+        glm::vec3 posA, velA, posB, velB, offsetRotA, offsetRotB;
         float massA, massB;
 
         if (rBait.m_a.m_id == -1)
         {
             // world-anchored
+            offsetRotA = rBait.m_a.m_offset;
             posA = rBait.m_a.m_offset;
             velA = glm::vec3{0.0f};
             massA = 9999999.0f;
         }
         else
         {
-            glm::vec3 const offsetRotated(rDyn.m_tf[rBait.m_a.m_id] * glm::vec4(rBait.m_a.m_offset, 0.0f));
-            posA = offsetRotated + glm::vec3(rDyn.m_tf[rBait.m_a.m_id][3]);
+            offsetRotA = rDyn.m_tf[rBait.m_a.m_id] * glm::vec4(rBait.m_a.m_offset, 0.0f);
+            posA = offsetRotA + glm::vec3(rDyn.m_tf[rBait.m_a.m_id][3]);
 
-            glm::vec3 const velTan = glm::cross(rDyn.m_vel[rBait.m_a.m_id].m_ang, offsetRotated);
+            glm::vec3 const velTan = glm::cross(rDyn.m_vel[rBait.m_a.m_id].m_ang, offsetRotA);
             velA = rDyn.m_vel[rBait.m_a.m_id].m_lin + velTan;
             massA = rDyn.m_mass[rBait.m_a.m_id];
         }
 
-        glm::vec3 const offsetRotated(rDyn.m_tf[rBait.m_b.m_id] * glm::vec4(rBait.m_b.m_offset, 0.0f));
-        posB = offsetRotated + glm::vec3(rDyn.m_tf[rBait.m_b.m_id][3]);
+        offsetRotB = (rDyn.m_tf[rBait.m_b.m_id] * glm::vec4(rBait.m_b.m_offset, 0.0f));
+        posB = offsetRotB + glm::vec3(rDyn.m_tf[rBait.m_b.m_id][3]);
 
-        glm::vec3 const velTan = glm::cross(rDyn.m_vel[rBait.m_b.m_id].m_ang, offsetRotated);
+        glm::vec3 const velTan = glm::cross(rDyn.m_vel[rBait.m_b.m_id].m_ang, offsetRotB);
         velB = rDyn.m_vel[rBait.m_b.m_id].m_lin + velTan;
 
         massB = rDyn.m_mass[rBait.m_b.m_id];
 
-        float const minMass = glm::min(massA, massB);
+
 
         glm::vec3 const     posRel  = posB - posA;
         glm::vec3 const     velRel  = velB - velA;
 
         // PD control lol what
         glm::vec3 const     p   = posRel * 32.0f;
-        glm::vec3 const     d   = velRel * 0.25f;
+        glm::vec3 const     d   = velRel * 0.5f;
 
         float const lenBSq = glm::length2(rBait.m_b.m_offset);
         float const lenASq = glm::length2(rBait.m_a.m_offset);
 
+        float const minMass = glm::min(massA, massB);
+        float const maxLen  = glm::max(lenASq, lenBSq);
+
         glm::vec3 const totalLinImp = (p + d) * minMass;
-        glm::vec3 const totalAngImp = glm::cross(offsetRotated, (p + d) * minMass) * 0.5f;
+        glm::vec3 const totalAngImp =  (p + d) * minMass * 1.0f / (maxLen + 1.0f);
 
         if (rBait.m_a.m_id != -1)
         {
             rDyn.m_cstImp[rBait.m_a.m_id].m_lin += totalLinImp;
-            rDyn.m_cstImp[rBait.m_a.m_id].m_ang += totalAngImp / (lenASq + 1.0f);
+            rDyn.m_cstImp[rBait.m_a.m_id].m_ang += glm::cross(offsetRotA, totalAngImp);
 
         }
 
         rDyn.m_cstImp[rBait.m_b.m_id].m_lin -= totalLinImp;
-        rDyn.m_cstImp[rBait.m_b.m_id].m_ang -= totalAngImp / (lenBSq + 1.0f);
+        rDyn.m_cstImp[rBait.m_b.m_id].m_ang -= glm::cross(offsetRotB, totalAngImp);
     }
 }
 
@@ -170,6 +174,9 @@ void apply_ext_forces(FrogDyn &rDyn, float delta)
             rDyn.m_tf[id] = glm::axisAngleMatrix(w / mag, mag * delta) * rDyn.m_tf[id];
             rDyn.m_tf[id][3] = saved;
         }
+
+        rDyn.m_extImp[id].m_ang = glm::vec3(0.0f);
+        rDyn.m_extImp[id].m_lin = glm::vec3(0.0f);
     }
 }
 
@@ -184,8 +191,8 @@ void apply_cst_forces(FrogDyn &rDyn, float delta)
             continue;
         }
 
-        rDyn.m_vel[id].m_lin += (rDyn.m_extImp[id].m_lin + rDyn.m_cstImp[id].m_lin) / rDyn.m_mass[id];
-        rDyn.m_vel[id].m_ang += (rDyn.m_extImp[id].m_ang + rDyn.m_cstImp[id].m_ang) / rDyn.m_mass[id];
+        rDyn.m_vel[id].m_lin += (rDyn.m_cstImp[id].m_lin) / rDyn.m_mass[id];
+        rDyn.m_vel[id].m_ang += (rDyn.m_cstImp[id].m_ang) / rDyn.m_mass[id];
 
         rDyn.m_tf[id][3] += glm::vec4(rDyn.m_vel[id].m_lin, 0.0f) * delta;
         auto const& w = rDyn.m_vel[id].m_ang;
@@ -195,7 +202,7 @@ void apply_cst_forces(FrogDyn &rDyn, float delta)
         {
             auto const saved = rDyn.m_tf[id][3];
             rDyn.m_tf[id][3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            rDyn.m_tf[id] = glm::axisAngleMatrix(w / mag, glm::min(mag, 0.05f) * delta) * rDyn.m_tf[id];
+            rDyn.m_tf[id] = glm::axisAngleMatrix(w / mag, mag * delta) * rDyn.m_tf[id];
             rDyn.m_tf[id][3] = saved;
         }
 
@@ -204,19 +211,19 @@ void apply_cst_forces(FrogDyn &rDyn, float delta)
     }
 }
 
-void clear_ext_forces(FrogDyn &rDyn)
-{
-    for (frog_id_t id = 0; id < rDyn.m_ids.capacity(); id ++)
-    {
-        if (!rDyn.m_ids.exists(id))
-        {
-            continue;
-        }
+//void clear_ext_forces(FrogDyn &rDyn)
+//{
+//    for (frog_id_t id = 0; id < rDyn.m_ids.capacity(); id ++)
+//    {
+//        if (!rDyn.m_ids.exists(id))
+//        {
+//            continue;
+//        }
 
-        rDyn.m_extImp[id].m_ang = glm::vec3(0.0f);
-        rDyn.m_extImp[id].m_lin = glm::vec3(0.0f);
-    }
-}
+//        rDyn.m_extImp[id].m_ang = glm::vec3(0.0f);
+//        rDyn.m_extImp[id].m_lin = glm::vec3(0.0f);
+//    }
+//}
 
 void calc_balls_pos(FrogDyn &rDyn)
 {
@@ -332,6 +339,9 @@ struct TestSceneB
 
     float m_camDist = 16.0f;
     float m_camAngle = 0.0f;
+
+    int m_cstSteps = 2;
+    float m_extPercent = 0.5f;
 };
 
 
@@ -351,8 +361,6 @@ static void draw_scene(TestSceneB &rScene)
     rScene.m_camAngle += (float(IsKeyDown(KEY_RIGHT)) - float(IsKeyDown(KEY_LEFT))) * delta * 3.14159f;
 
     rScene.m_camera.position = Vector3{ std::sin(rScene.m_camAngle) * rScene.m_camDist, 3.0f, std::cos(rScene.m_camAngle) * rScene.m_camDist };
-
-
 
     BeginDrawing();
 
@@ -387,27 +395,22 @@ static void draw_scene(TestSceneB &rScene)
                 DrawLine3D(Vector3{p.x, p.y, p.z}, Vector3{p.x + push.x * 5.0f, p.y + push.y * 5.0f, p.z + push.z * 5.0f}, Color{0, 255, 0, 255});
             }
 
-            float deltaA = delta / 2.0f;
+            float const cstPercent = 1.0f - rScene.m_extPercent;
 
-            apply_ext_forces(rScene.m_frogs, deltaA);
-
-            float deltaB = delta / 32.0f / 2.0f;
+            apply_ext_forces(rScene.m_frogs, delta * rScene.m_extPercent);
 
             // repeat constrain forces a few times
-            for (int j = 0; j < 32; j++)
+            for (int j = 0; j < rScene.m_cstSteps; j++)
             {
 
                 apply_baits(rScene.m_frogs);
 
-                apply_cst_forces(rScene.m_frogs, deltaB);
+                apply_cst_forces(rScene.m_frogs, delta * cstPercent / float(rScene.m_cstSteps));
 
                 calc_balls_pos(rScene.m_frogs);
 
                 calc_frog_collisions(rScene.m_frogs);
             }
-
-            // clear external forces
-            clear_ext_forces(rScene.m_frogs);
 
             glm::vec3 avgPos{0.0f};
             float totalMass = 0.0f;
@@ -536,40 +539,37 @@ SceneFunc_t orni::gen_test_scene_b()
     std::shared_ptr<TestSceneB> pScene = std::make_shared<TestSceneB>();
     TestSceneB &rScene = *pScene;
 
+    rScene.m_extPercent = 0.7f;
+    rScene.m_cstSteps = 8;
+
     rScene.m_mat = LoadMaterialDefault();
     rScene.m_cube = GenMeshCube(0.5f, 0.5f, 0.5f);
     rScene.m_ui = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
 
-    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 4.0f );
-
-    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 5.0f );
-
     add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 0.1f );
 
     add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 0.1f );
+
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 0.1f );
+
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 1.5f );
 
     // global constrained
     rScene.m_frogs.m_baits.emplace_back(
                 FrogDyn::Bait{ {-1,  {0.0f, 7.0f, 0.0f}},
-                               {0,   {0.0f, 3.0f, 0.0f}} });
-
-    // floating
-//    rScene.m_baits[0].m_a.m_id = 3;
-//    rScene.m_baits[0].m_a.m_offset.y = -3;
-//    rScene.m_baits[0].m_b.m_id = 0;
-//    rScene.m_baits[0].m_b.m_offset.y = 3;
+                               {0,   {0.0f, 1.0f, 0.0f}} });
 
     rScene.m_frogs.m_baits.emplace_back(
                 FrogDyn::Bait{ {0,  {0.0f, -1.0f, 0.0f}},
                                {1,   {0.0f, 1.0f, 0.0f}} });
 
     rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {1,   {0.0f, -0.7f, 0.0f}},
-                               {2,   {0.0f,  0.7f, 0.0f}} });
+                FrogDyn::Bait{ {1,   {0.0f, -1.0f, 0.0f}},
+                               {2,   {0.0f,  1.0f, 0.0f}} });
 
     rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {2,   {0.0f, -0.7f, 0.0f}},
-                               {3,   {0.0f,  0.7f, 0.0f}} });
+                FrogDyn::Bait{ {2,   {0.0f, -1.0f, 0.0f}},
+                               {3,   {0.0f,  1.0f, 0.0f}} });
 
     rScene.m_camera.target = Vector3{ 0.0f, 2.0f, 0.0f };
     rScene.m_camera.up = Vector3{ 0.0f, 1.0f, 0.0f };
@@ -587,13 +587,15 @@ SceneFunc_t orni::gen_test_scene_b_b()
     std::shared_ptr<TestSceneB> pScene = std::make_shared<TestSceneB>();
     TestSceneB &rScene = *pScene;
 
+    rScene.m_cstSteps = 2;
+
     rScene.m_mat = LoadMaterialDefault();
     rScene.m_cube = GenMeshCube(0.5f, 0.5f, 0.5f);
     rScene.m_ui = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
 
-    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 4.0f );
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 6.0f );
 
-    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 5.0f );
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 0.2f );
 
     add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 5.0f );
 

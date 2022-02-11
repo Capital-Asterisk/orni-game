@@ -22,9 +22,17 @@ void load_default_scene()
 
 void update_draw_frame()
 {
-    if (IsKeyDown(KEY_TAB))
+    if (IsKeyDown(KEY_ONE))
     {
-        load_default_scene();
+        g_sceneFunc = orni::gen_test_scene_a();
+    }
+    else if (IsKeyDown(KEY_TWO))
+    {
+        g_sceneFunc = orni::gen_test_scene_b();
+    }
+    else if (IsKeyDown(KEY_THREE))
+    {
+        g_sceneFunc = orni::gen_test_scene_b_b();
     }
     g_sceneFunc(g_gameState);
 }
