@@ -9,6 +9,7 @@
 
 #include <glm/mat4x4.hpp>
 #include <glm/gtx/string_cast.hpp>
+#include <glm/gtx/norm.hpp>
 #include <glm/gtx/matrix_interpolation.hpp>
 
 #include <memory>
@@ -25,6 +26,14 @@ using frog_id_t = int;
 struct FrogDyn
 {
     struct Ball
+    {
+        glm::vec3   m_pos;
+        float       m_radius;
+        int         m_bitType;
+        int         m_bitCollide;
+    };
+
+    struct BallOut
     {
         glm::vec3   m_pos;
         float       m_radius;
@@ -46,6 +55,11 @@ struct FrogDyn
         glm::vec3 m_min, m_max;
     };
 
+    struct CollisionCheck
+    {
+        frog_id_t m_a, m_b;
+    };
+
     struct LinAng
     {
         glm::vec3 m_lin;
@@ -53,12 +67,20 @@ struct FrogDyn
     };
 
     lgrn::IdRegistry<frog_id_t> m_ids;
-    std::vector<glm::mat4x4> m_tf;
-    std::vector<LinAng> m_extImp;
-    std::vector<LinAng> m_cstImp;
-    std::vector<LinAng> m_vel;
-    std::vector<float> m_mass;
+    std::vector<glm::mat4x4>    m_tf;
+    std::vector<LinAng>         m_extImp;
+    std::vector<LinAng>         m_cstImp;
+    std::vector<LinAng>         m_vel;
+    std::vector<float>          m_mass;
+    std::vector<float>          m_scale;
 
+    std::vector<AABB> m_aabb;
+
+    std::vector<frog_id_t> m_canCollide;
+    lgrn::IntArrayMultiMap<frog_id_t, Ball>     m_balls;
+    lgrn::IntArrayMultiMap<frog_id_t, BallOut>  m_ballPos;
+
+    //std::vector<Ball> m_ballData;
 
     std::vector<Bait> m_baits;
 };
@@ -101,31 +123,26 @@ void apply_baits(FrogDyn &rDyn)
 
         glm::vec3 const     posRel  = posB - posA;
         glm::vec3 const     velRel  = velB - velA;
-        float const         r       = glm::max(glm::length(posRel), 0.001f);
-        glm::vec3 const     dir     = posRel / r;
-
-        float const         velDot  = glm::dot(velRel, dir);
 
         // PD control lol what
-        float const         p   = r * (16.0f + minMass * 2.0f);
-        float const         d   = velDot;
-        glm::vec3 const     pd  = -dir * p;
+        glm::vec3 const     p   = posRel * 32.0f;
+        glm::vec3 const     d   = velRel * 0.25f;
 
-        float const lenB = glm::length(rBait.m_b.m_offset);
-        glm::vec3 const     damp = -velRel * 0.25f;
+        float const lenBSq = glm::length2(rBait.m_b.m_offset);
+        float const lenASq = glm::length2(rBait.m_a.m_offset);
 
-        glm::vec3 const totalLinImp = (pd + damp) * minMass;
-        glm::vec3 const totalAngImp = (glm::cross(offsetRotated, totalLinImp)) * minMass;
+        glm::vec3 const totalLinImp = (p + d) * minMass;
+        glm::vec3 const totalAngImp = glm::cross(offsetRotated, (p + d) * minMass) * 0.5f;
 
         if (rBait.m_a.m_id != -1)
         {
-            rDyn.m_cstImp[rBait.m_a.m_id].m_lin -= totalLinImp;
-            rDyn.m_cstImp[rBait.m_a.m_id].m_ang -= totalAngImp / (lenB+lenB*lenB);
+            rDyn.m_cstImp[rBait.m_a.m_id].m_lin += totalLinImp;
+            rDyn.m_cstImp[rBait.m_a.m_id].m_ang += totalAngImp / (lenASq + 1.0f);
 
         }
 
-        rDyn.m_cstImp[rBait.m_b.m_id].m_lin += totalLinImp;
-        rDyn.m_cstImp[rBait.m_b.m_id].m_ang += totalAngImp / (lenB+lenB*lenB);
+        rDyn.m_cstImp[rBait.m_b.m_id].m_lin -= totalLinImp;
+        rDyn.m_cstImp[rBait.m_b.m_id].m_ang -= totalAngImp / (lenBSq + 1.0f);
     }
 }
 
@@ -178,7 +195,7 @@ void apply_cst_forces(FrogDyn &rDyn, float delta)
         {
             auto const saved = rDyn.m_tf[id][3];
             rDyn.m_tf[id][3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-            rDyn.m_tf[id] = glm::axisAngleMatrix(w / mag, mag * delta) * rDyn.m_tf[id];
+            rDyn.m_tf[id] = glm::axisAngleMatrix(w / mag, glm::min(mag, 0.05f) * delta) * rDyn.m_tf[id];
             rDyn.m_tf[id][3] = saved;
         }
 
@@ -201,6 +218,104 @@ void clear_ext_forces(FrogDyn &rDyn)
     }
 }
 
+void calc_balls_pos(FrogDyn &rDyn)
+{
+    for (frog_id_t id : rDyn.m_canCollide)
+    {
+        auto const& tf      = rDyn.m_tf[id];
+        auto &rAABB         = rDyn.m_aabb[id];
+        auto const ballsIn  = rDyn.m_balls[id];
+        auto posOut         = rDyn.m_ballPos[id];
+
+        rAABB.m_min = glm::vec3{9999, 9999, 9999};
+        rAABB.m_max = glm::vec3{-9999, -9999, -9999};
+
+        for (unsigned int i = 0; i < ballsIn.size(); i ++)
+        {
+            auto const &ball = ballsIn[i];
+            auto &rOut = posOut[i];
+            rOut.m_pos = tf * glm::vec4(ball.m_pos, 1.0f);
+            rOut.m_radius = ball.m_radius * rDyn.m_scale[id];
+
+            rAABB.m_max = glm::max(rOut.m_pos + rOut.m_radius, rAABB.m_max);
+            rAABB.m_min = glm::min(rOut.m_pos - rOut.m_radius, rAABB.m_min);
+        }
+    }
+}
+
+constexpr bool aabb_intersect(FrogDyn::AABB const& a, FrogDyn::AABB const& b) noexcept
+{
+    return     (a.m_min.x < b.m_max.x) && (a.m_max.x > b.m_min.x)
+            && (a.m_min.y < b.m_max.y) && (a.m_max.y > b.m_min.y)
+            && (a.m_min.z < b.m_max.z) && (a.m_max.z > b.m_min.z);
+}
+
+using BallCollisions_t = lgrn::IntArrayMultiMap<frog_id_t, FrogDyn::BallOut>::Span;
+
+struct BallContact
+{
+    glm::vec3   m_pos{0.0f};
+    glm::vec3   m_nrm{0.0f};
+    int         m_count{0};
+};
+
+BallContact calc_ball_collisions(BallCollisions_t a, BallCollisions_t b)
+{
+    BallContact contact;
+    // test each ball A against each ballB
+    for (auto const& ballA : a)
+    {
+        for (auto const& ballB : b)
+        {
+            float const radC = ballA.m_radius + ballB.m_radius;
+            float const distSq = glm::distance2(ballA.m_pos, ballB.m_pos);
+            if (distSq < (radC * radC))
+            {
+                contact.m_count ++;
+                contact.m_pos += (ballA.m_pos * ballB.m_radius + ballB.m_pos * ballA.m_radius) / radC;
+                contact.m_nrm += (ballB.m_pos - ballA.m_pos) / glm::sqrt(distSq);
+            }
+        }
+    }
+    return contact;
+}
+
+void calc_frog_collisions(FrogDyn &rDyn)
+{
+    //   0  1  2  3  4  5
+    // 0
+    // 1 x
+    // 2 x  x
+    // 3 x  x  x
+    // 4 x  x  x  x
+    // 5 x  x  x  x  x
+
+    for (int i = 1; i < rDyn.m_canCollide.size(); i ++)
+    {
+        for (int j = 0; j < i; j ++)
+        {
+            frog_id_t const a = rDyn.m_canCollide[i];
+            frog_id_t const b = rDyn.m_canCollide[j];
+
+            if (aabb_intersect(rDyn.m_aabb[a], rDyn.m_aabb[b]))
+            {
+                // AABBs intersect, now start checking balls
+                BallContact contact = calc_ball_collisions(rDyn.m_ballPos[a], rDyn.m_ballPos[b]);
+                if (contact.m_count != 0)
+                {
+                    glm::vec3 const pos = contact.m_pos / float(contact.m_count);
+                    glm::vec3 const nrm = contact.m_nrm / float(contact.m_count);
+
+                    glm::vec3 const posnrm = pos + nrm;
+
+                    DrawSphereWires(reinterpret_cast<Vector3 const&>(pos), 0.1f, 5, 6, Color{255, 0, 255, 255});
+                    DrawLine3D(reinterpret_cast<Vector3 const&>(pos), reinterpret_cast<Vector3 const&>(posnrm), Color{0, 255, 0, 255});
+                }
+            }
+        }
+    }
+}
+
 struct TestSceneB
 {
     Camera3D m_camera;
@@ -215,13 +330,11 @@ struct TestSceneB
 
     float m_time = 0.0f;
 
+    float m_camDist = 16.0f;
     float m_camAngle = 0.0f;
 };
 
-void apply_impulse_at()
-{
 
-}
 
 static void draw_scene(TestSceneB &rScene)
 {
@@ -230,13 +343,14 @@ static void draw_scene(TestSceneB &rScene)
     float delta = 1.0f / 60.0f;
     t += GetFrameTime();
 
-    rScene.m_frogs.m_baits[0].m_b.m_offset.y += (float(IsKeyDown(KEY_S)) - float(IsKeyDown(KEY_W))) * delta * 5.0f;
+    rScene.m_frogs.m_baits[0].m_b.m_offset.y += (float(IsKeyDown(KEY_S)) - float(IsKeyDown(KEY_W))) * delta * 1.0f;
+    rScene.m_camDist += (float(IsKeyDown(KEY_Z)) - float(IsKeyDown(KEY_X))) * delta * 10.0f;
 
-    std::cout << "a: " << rScene.m_frogs.m_baits[0].m_b.m_offset.y << "\n";
+    //std::cout << "a: " << rScene.m_frogs.m_baits[0].m_b.m_offset.y << "\n";
 
     rScene.m_camAngle += (float(IsKeyDown(KEY_RIGHT)) - float(IsKeyDown(KEY_LEFT))) * delta * 3.14159f;
 
-    rScene.m_camera.position = Vector3{ std::sin(rScene.m_camAngle) * 16.0f, 3.0f, std::cos(rScene.m_camAngle) * 16.0f };
+    rScene.m_camera.position = Vector3{ std::sin(rScene.m_camAngle) * rScene.m_camDist, 3.0f, std::cos(rScene.m_camAngle) * rScene.m_camDist };
 
 
 
@@ -277,16 +391,19 @@ static void draw_scene(TestSceneB &rScene)
 
             apply_ext_forces(rScene.m_frogs, deltaA);
 
-            float deltaB = delta / 8.0f;
+            float deltaB = delta / 32.0f / 2.0f;
 
             // repeat constrain forces a few times
-            for (int j = 0; j < 8; j++)
+            for (int j = 0; j < 32; j++)
             {
 
                 apply_baits(rScene.m_frogs);
 
                 apply_cst_forces(rScene.m_frogs, deltaB);
 
+                calc_balls_pos(rScene.m_frogs);
+
+                calc_frog_collisions(rScene.m_frogs);
             }
 
             // clear external forces
@@ -305,12 +422,37 @@ static void draw_scene(TestSceneB &rScene)
                 avgPos += glm::vec3(rScene.m_frogs.m_tf[id][3]) * rScene.m_frogs.m_mass[id];
                 totalMass += rScene.m_frogs.m_mass[id];
 
-                auto transposed = glm::transpose(rScene.m_frogs.m_tf[id]);
+                auto tf =(rScene.m_frogs.m_tf[id]);
 
-                DrawMesh(rScene.m_cube, rScene.m_mat, reinterpret_cast<Matrix&>(transposed));
+                auto tip = glm::vec3(tf[3] - tf[1] * 0.5f);
+                auto tail = glm::vec3(tf[3] + tf[1] * 0.5f);
+
+                DrawCylinderWiresEx(
+                        reinterpret_cast<Vector3&>(tip),
+                        reinterpret_cast<Vector3&>(tail),
+                        0.2f, 0.2f, 4, Color{255, 255, 255, 255});
+                //DrawMesh(rScene.m_cube, rScene.m_mat, reinterpret_cast<Matrix&>(transposed));
+
+                // draw the balls if the frog has balls
+                if (rScene.m_frogs.m_ballPos.contains(id))
+                {
+                    // loop throught the balls
+                    for (auto& ball : rScene.m_frogs.m_ballPos[id])
+                    {
+                        DrawSphereWires(reinterpret_cast<Vector3&>(ball.m_pos), ball.m_radius, 5, 6, Color{255, 255, 255, 255});
+                    }
+                }
             }
 
             avgPos /= totalMass;
+
+            // draw AABBs
+            for (frog_id_t id : rScene.m_frogs.m_canCollide)
+            {
+                BoundingBox box{ reinterpret_cast<Vector3&>(rScene.m_frogs.m_aabb[id].m_min),
+                                 reinterpret_cast<Vector3&>(rScene.m_frogs.m_aabb[id].m_max)};
+                DrawBoundingBox(box, Color{0, 255, 0, 255});
+            }
 
             // draw center of mass
             DrawSphereWires(reinterpret_cast<Vector3&>(avgPos), 0.3f, 2, 4, Color{255, 255, 0, 255});
@@ -366,6 +508,8 @@ static void draw_scene(TestSceneB &rScene)
     EndDrawing();
 }
 
+
+
 frog_id_t add_frog(FrogDyn &rDyn, glm::mat4x4 const& tf, float mass)
 {
     frog_id_t const id = rDyn.m_ids.create();
@@ -375,12 +519,17 @@ frog_id_t add_frog(FrogDyn &rDyn, glm::mat4x4 const& tf, float mass)
     rDyn.m_vel      .resize(capacity);
     rDyn.m_mass     .resize(capacity);
     rDyn.m_tf       .resize(capacity);
+    rDyn.m_scale    .resize(capacity);
+    rDyn.m_aabb     .resize(capacity);
+    rDyn.m_balls    .resize_ids(capacity);
 
+    rDyn.m_scale[id]    = 1.0f;
     rDyn.m_mass[id]     = mass;
     rDyn.m_tf[id]       = tf;
 
     return id;
 }
+
 
 SceneFunc_t orni::gen_test_scene_b()
 {
@@ -399,13 +548,10 @@ SceneFunc_t orni::gen_test_scene_b()
 
     add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 0.1f );
 
-    rScene.m_frogs.m_baits.resize(4);
-
     // global constrained
-    rScene.m_frogs.m_baits[0].m_a.m_id = -1;
-    rScene.m_frogs.m_baits[0].m_a.m_offset.y = 7;
-    rScene.m_frogs.m_baits[0].m_b.m_id = 0;
-    rScene.m_frogs.m_baits[0].m_b.m_offset.y = 3;
+    rScene.m_frogs.m_baits.emplace_back(
+                FrogDyn::Bait{ {-1,  {0.0f, 7.0f, 0.0f}},
+                               {0,   {0.0f, 3.0f, 0.0f}} });
 
     // floating
 //    rScene.m_baits[0].m_a.m_id = 3;
@@ -413,20 +559,17 @@ SceneFunc_t orni::gen_test_scene_b()
 //    rScene.m_baits[0].m_b.m_id = 0;
 //    rScene.m_baits[0].m_b.m_offset.y = 3;
 
-    rScene.m_frogs.m_baits[1].m_a.m_id = 0;
-    rScene.m_frogs.m_baits[1].m_a.m_offset.y = -1;
-    rScene.m_frogs.m_baits[1].m_b.m_id = 1;
-    rScene.m_frogs.m_baits[1].m_b.m_offset.y = 1;
+    rScene.m_frogs.m_baits.emplace_back(
+                FrogDyn::Bait{ {0,  {0.0f, -1.0f, 0.0f}},
+                               {1,   {0.0f, 1.0f, 0.0f}} });
 
-    rScene.m_frogs.m_baits[2].m_a.m_id = 1;
-    rScene.m_frogs.m_baits[2].m_a.m_offset.y = -0.7;
-    rScene.m_frogs.m_baits[2].m_b.m_id = 2;
-    rScene.m_frogs.m_baits[2].m_b.m_offset.y = 0.7;
+    rScene.m_frogs.m_baits.emplace_back(
+                FrogDyn::Bait{ {1,   {0.0f, -0.7f, 0.0f}},
+                               {2,   {0.0f,  0.7f, 0.0f}} });
 
-    rScene.m_frogs.m_baits[3].m_a.m_id = 2;
-    rScene.m_frogs.m_baits[3].m_a.m_offset.y = -0.7;
-    rScene.m_frogs.m_baits[3].m_b.m_id = 3;
-    rScene.m_frogs.m_baits[3].m_b.m_offset.y = 0.7;
+    rScene.m_frogs.m_baits.emplace_back(
+                FrogDyn::Bait{ {2,   {0.0f, -0.7f, 0.0f}},
+                               {3,   {0.0f,  0.7f, 0.0f}} });
 
     rScene.m_camera.target = Vector3{ 0.0f, 2.0f, 0.0f };
     rScene.m_camera.up = Vector3{ 0.0f, 1.0f, 0.0f };
@@ -438,3 +581,63 @@ SceneFunc_t orni::gen_test_scene_b()
         draw_scene(*pScene);
     };
 }
+
+SceneFunc_t orni::gen_test_scene_b_b()
+{
+    std::shared_ptr<TestSceneB> pScene = std::make_shared<TestSceneB>();
+    TestSceneB &rScene = *pScene;
+
+    rScene.m_mat = LoadMaterialDefault();
+    rScene.m_cube = GenMeshCube(0.5f, 0.5f, 0.5f);
+    rScene.m_ui = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
+
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 4.0f );
+
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 5.0f );
+
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 5.0f );
+
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 4.0f );
+
+    // add balls
+    rScene.m_frogs.m_balls.resize_ids(20);
+    rScene.m_frogs.m_balls.resize_data(20);
+    rScene.m_frogs.m_ballPos.resize_ids(20);
+    rScene.m_frogs.m_ballPos.resize_data(20);
+
+    rScene.m_frogs.m_canCollide = {0, 2};
+
+    rScene.m_frogs.m_balls.emplace(0, { {{0.0f, 0.0f, 0.0f}, 0.4f, 1, 1}, {{0.0f, 0.5f, 0.0f}, 0.4f, 1, 1}, {{-1.0f, 3.0f, 0.0f}, 0.4f, 1, 1} } );
+    rScene.m_frogs.m_ballPos.emplace(0, 3);
+
+    rScene.m_frogs.m_balls.emplace(2, { {{0.0f, 0.0f, 0.0f}, 0.7f, 1, 1}, {{0.0f, -0.5f, 0.0f}, 0.7f, 1, 1} });
+    rScene.m_frogs.m_ballPos.emplace(2, 2);
+
+
+    rScene.m_frogs.m_baits.emplace_back(
+                FrogDyn::Bait{ {-1,  {1.0f, 5.0f, 0.0f}},
+                               {0,   {0.0f, 2.0f, 0.0f}} });
+
+    rScene.m_frogs.m_baits.emplace_back(
+                FrogDyn::Bait{ {0,  {0.0f, -2.0f, 0.0f}},
+                               {1,   {0.0f, 2.0f, 0.0f}} });
+
+    rScene.m_frogs.m_baits.emplace_back(
+                FrogDyn::Bait{ {-1,  {-1.0f, 5.0f, 0.0f}},
+                               {2,   {0.0f,  2.0f, 0.0f}} });
+
+    rScene.m_frogs.m_baits.emplace_back(
+                FrogDyn::Bait{ {2,   {0.0f, -2.0f, 0.0f}},
+                               {3,   {0.0f,  2.0f, 0.0f}} });
+
+    rScene.m_camera.target = Vector3{ 0.0f, 2.0f, 0.0f };
+    rScene.m_camera.up = Vector3{ 0.0f, 1.0f, 0.0f };
+    rScene.m_camera.fovy = 50.0f;
+    rScene.m_camera.projection = CAMERA_PERSPECTIVE;
+
+    return [pScene = std::move(pScene)] (GameState &rGame) -> void
+    {
+        draw_scene(*pScene);
+    };
+}
+

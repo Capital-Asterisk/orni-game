@@ -36,6 +36,8 @@ add_subdirectory("3rdparty/longeronpp")
 
 project(ornigame)
 
+set(CMAKE_CXX_STANDARD 17)
+
 file (GLOB_RECURSE C_FILES src/*.cpp)
 file (GLOB_RECURSE H_FILES src/*.h)
 set (SOURCE_FILES ${C_FILES} ${H_FILES})
