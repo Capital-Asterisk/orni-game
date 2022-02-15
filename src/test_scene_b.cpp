@@ -136,7 +136,7 @@ void apply_baits(FrogDyn &rDyn)
         float const maxLen  = glm::max(lenASq, lenBSq);
 
         glm::vec3 const totalLinImp = (p + d) * minMass;
-        glm::vec3 const totalAngImp =  (p + d) * minMass * 1.0f / (maxLen + 1.0f);
+        glm::vec3 const totalAngImp = totalLinImp * 1.1f / (maxLen + 1.0f);
 
         if (rBait.m_a.m_id != -1)
         {
@@ -263,6 +263,7 @@ struct BallContact
 {
     glm::vec3   m_pos{0.0f};
     glm::vec3   m_nrm{0.0f};
+    float       m_depth{0.0f};
     int         m_count{0};
 };
 
@@ -278,7 +279,10 @@ BallContact calc_ball_collisions(BallCollisions_t a, BallCollisions_t b)
             float const distSq = glm::distance2(ballA.m_pos, ballB.m_pos);
             if (distSq < (radC * radC))
             {
+                float const dist = glm::sqrt(distSq);
+
                 contact.m_count ++;
+                contact.m_depth += radC - dist;
                 contact.m_pos += (ballA.m_pos * ballB.m_radius + ballB.m_pos * ballA.m_radius) / radC;
                 contact.m_nrm += (ballB.m_pos - ballA.m_pos) / glm::sqrt(distSq);
             }
@@ -313,10 +317,41 @@ void calc_frog_collisions(FrogDyn &rDyn)
                     glm::vec3 const pos = contact.m_pos / float(contact.m_count);
                     glm::vec3 const nrm = contact.m_nrm / float(contact.m_count);
 
-                    glm::vec3 const posnrm = pos + nrm;
+                    glm::vec3 const posA = pos - glm::vec3(rDyn.m_tf[a][3]);
+                    glm::vec3 const posB = pos - glm::vec3(rDyn.m_tf[b][3]);
+
+                    //glm::vec3 const velTanA = glm::cross(rDyn.m_vel[a].m_ang, posA);
+                    //glm::vec3 const velTanB = glm::cross(rDyn.m_vel[b].m_ang, posB);
+
+                    //rDyn.m_vel[b].m_lin + velTanB - rDyn.m_vel[a].m_lin - velTanA;
+                    glm::vec3 const velRel = rDyn.m_vel[b].m_lin - rDyn.m_vel[a].m_lin;
+
+                    float const hiteachotherness = glm::dot(velRel, nrm);
+                    glm::vec3 const velTan = velRel - nrm * hiteachotherness;
+
+                    float const minMass = glm::min(rDyn.m_mass[a], rDyn.m_mass[b]);
+
+
+                    glm::vec3 const nrmImp = nrm * glm::min(0.0f, glm::dot(velRel, nrm) - contact.m_depth) * 0.5f;
+
+
+                    //float const friction = 0.0f;
+                    //glm::vec3 const totalImp = (nrmImp + velTan * friction) * minMass;
+                    glm::vec3 const totalImp = nrmImp * minMass;
+
+                    rDyn.m_cstImp[a].m_lin += totalImp;
+                    rDyn.m_cstImp[a].m_ang += glm::cross(posA, totalImp);
+
+                    rDyn.m_cstImp[b].m_lin -= totalImp;
+                    rDyn.m_cstImp[b].m_ang -= glm::cross(posB, totalImp);
+
+
+                    glm::vec3 const posnrm = pos + velTan * 1.0f;
+
 
                     DrawSphereWires(reinterpret_cast<Vector3 const&>(pos), 0.1f, 5, 6, Color{255, 0, 255, 255});
                     DrawLine3D(reinterpret_cast<Vector3 const&>(pos), reinterpret_cast<Vector3 const&>(posnrm), Color{0, 255, 0, 255});
+
                 }
             }
         }
@@ -353,7 +388,7 @@ static void draw_scene(TestSceneB &rScene)
     float delta = 1.0f / 60.0f;
     t += GetFrameTime();
 
-    rScene.m_frogs.m_baits[0].m_b.m_offset.y += (float(IsKeyDown(KEY_S)) - float(IsKeyDown(KEY_W))) * delta * 1.0f;
+    rScene.m_frogs.m_baits[0].m_b.m_offset.y += (float(IsKeyDown(KEY_S)) - float(IsKeyDown(KEY_W))) * delta * 10.0f;
     rScene.m_camDist += (float(IsKeyDown(KEY_Z)) - float(IsKeyDown(KEY_X))) * delta * 10.0f;
 
     //std::cout << "a: " << rScene.m_frogs.m_baits[0].m_b.m_offset.y << "\n";
@@ -381,6 +416,15 @@ static void draw_scene(TestSceneB &rScene)
                 for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
                 {
                     rScene.m_frogs.m_vel[i].m_lin *= 0.50f;
+                }
+            }
+
+
+            if (IsKeyDown(KEY_LEFT_ALT))
+            {
+                for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
+                {
+                    rScene.m_frogs.m_vel[i].m_ang *= 0.50f;
                 }
             }
 
@@ -425,16 +469,17 @@ static void draw_scene(TestSceneB &rScene)
                 avgPos += glm::vec3(rScene.m_frogs.m_tf[id][3]) * rScene.m_frogs.m_mass[id];
                 totalMass += rScene.m_frogs.m_mass[id];
 
-                auto tf =(rScene.m_frogs.m_tf[id]);
+                auto tf = rScene.m_frogs.m_tf[id];
+                auto transposed = glm::transpose(tf);
 
                 auto tip = glm::vec3(tf[3] - tf[1] * 0.5f);
                 auto tail = glm::vec3(tf[3] + tf[1] * 0.5f);
 
-                DrawCylinderWiresEx(
-                        reinterpret_cast<Vector3&>(tip),
-                        reinterpret_cast<Vector3&>(tail),
-                        0.2f, 0.2f, 4, Color{255, 255, 255, 255});
-                //DrawMesh(rScene.m_cube, rScene.m_mat, reinterpret_cast<Matrix&>(transposed));
+//                DrawCylinderWiresEx(
+//                        reinterpret_cast<Vector3&>(tip),
+//                        reinterpret_cast<Vector3&>(tail),
+//                        0.2f, 0.2f, 4, Color{255, 255, 255, 255});
+                DrawMesh(rScene.m_cube, rScene.m_mat, reinterpret_cast<Matrix&>(transposed));
 
                 // draw the balls if the frog has balls
                 if (rScene.m_frogs.m_ballPos.contains(id))
@@ -587,19 +632,21 @@ SceneFunc_t orni::gen_test_scene_b_b()
     std::shared_ptr<TestSceneB> pScene = std::make_shared<TestSceneB>();
     TestSceneB &rScene = *pScene;
 
-    rScene.m_cstSteps = 2;
+    rScene.m_cstSteps = 24;
 
     rScene.m_mat = LoadMaterialDefault();
     rScene.m_cube = GenMeshCube(0.5f, 0.5f, 0.5f);
     rScene.m_ui = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
 
-    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 6.0f );
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {1.0f, 1.0f, 0.0f}), 6.0f );
 
-    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 0.2f );
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {2.0f, 1.0f, 0.0f}), 0.2f );
 
-    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 5.0f );
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {3.0f, 1.0f, 0.0f}), 5.0f );
 
-    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 4.0f );
+    add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {4.0f, 1.0f, 0.0f}), 4.0f );
+
+    //rScene.m_frogs.m_vel[2].m_ang.y = 10.0f;
 
     // add balls
     rScene.m_frogs.m_balls.resize_ids(20);
@@ -607,14 +654,19 @@ SceneFunc_t orni::gen_test_scene_b_b()
     rScene.m_frogs.m_ballPos.resize_ids(20);
     rScene.m_frogs.m_ballPos.resize_data(20);
 
-    rScene.m_frogs.m_canCollide = {0, 2};
+    rScene.m_frogs.m_canCollide = {0, 1, 2, 3};
 
-    rScene.m_frogs.m_balls.emplace(0, { {{0.0f, 0.0f, 0.0f}, 0.4f, 1, 1}, {{0.0f, 0.5f, 0.0f}, 0.4f, 1, 1}, {{-1.0f, 3.0f, 0.0f}, 0.4f, 1, 1} } );
-    rScene.m_frogs.m_ballPos.emplace(0, 3);
+    rScene.m_frogs.m_balls.emplace(0, { {{0.0f, 0.0f, 0.0f}, 0.4f, 1, 1}, {{0.0f, 0.5f, 0.0f}, 0.4f, 1, 1} } );
+    rScene.m_frogs.m_ballPos.emplace(0, 2);
 
     rScene.m_frogs.m_balls.emplace(2, { {{0.0f, 0.0f, 0.0f}, 0.7f, 1, 1}, {{0.0f, -0.5f, 0.0f}, 0.7f, 1, 1} });
     rScene.m_frogs.m_ballPos.emplace(2, 2);
 
+    rScene.m_frogs.m_balls.emplace(1, { {{0.0f, 0.0f, 0.0f}, 0.7f, 1, 1} });
+    rScene.m_frogs.m_ballPos.emplace(1, 1);
+
+    rScene.m_frogs.m_balls.emplace(3, { {{0.0f, 0.0f, 0.0f}, 0.7f, 1, 1} });
+    rScene.m_frogs.m_ballPos.emplace(3, 1);
 
     rScene.m_frogs.m_baits.emplace_back(
                 FrogDyn::Bait{ {-1,  {1.0f, 5.0f, 0.0f}},
@@ -629,7 +681,7 @@ SceneFunc_t orni::gen_test_scene_b_b()
                                {2,   {0.0f,  2.0f, 0.0f}} });
 
     rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {2,   {0.0f, -2.0f, 0.0f}},
+                FrogDyn::Bait{ {0,   {0.0f, -2.0f, 0.0f}},
                                {3,   {0.0f,  2.0f, 0.0f}} });
 
     rScene.m_camera.target = Vector3{ 0.0f, 2.0f, 0.0f };
