@@ -17,7 +17,7 @@ std::function<void(orni::GameState&)> g_sceneFunc;
 
 void load_default_scene()
 {
-     g_sceneFunc = orni::gen_test_scene_b_b();
+     g_sceneFunc = orni::gen_test_scene_c();
 }
 
 void update_draw_frame()
