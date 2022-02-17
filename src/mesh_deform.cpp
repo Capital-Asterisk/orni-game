@@ -31,6 +31,7 @@ void meshdeform::calculate_joint_transforms(
 
 void meshdeform::apply_vertex_transform(
         Joints const        &joints,
+        MeshJoints const    &meshJoints,
         Targets const&      tgt,
         glm::vec3 const*    pPosIn,
         glm::vec3 const*    pNrmIn,
@@ -45,8 +46,8 @@ void meshdeform::apply_vertex_transform(
     glm::vec3 const *pPosInCurr = &pPosIn[first];
     glm::vec3 const *pNrmInCurr = &pNrmIn[first];
 
-    float const *pWeightCurr = &joints.m_pWeightsIn[first * 4];
-    unsigned char const *pJointCurr = &joints.m_pJointsIn[first * 4];
+    float const *pWeightCurr = &meshJoints.m_pWeightsIn[first * 4];
+    unsigned char const *pJointCurr = &meshJoints.m_pJointsIn[first * 4];
 
     for (std::size_t i = first; i < last; i ++)
     {

@@ -1,4 +1,5 @@
 #include "scenes.hpp"
+#include "frogdyn.hpp"
 
 #include "mesh_deform.hpp"
 
@@ -9,42 +10,74 @@
 #include <rlgl.h>
 
 #include <memory>
+#include <iostream>
+
+using namespace frogdyn;
 
 namespace orni
 {
 
-struct AnimMesh
-{
-    glm::vec3 const* m_pPosIn;
-    glm::vec3 const* m_pNrmIn;
-
-    std::vector<glm::vec3> m_Pos;
-    std::vector<glm::vec3> m_Nrm;
-};
+using salad_id_t = int;
 
 struct SaladModel
 {
-    AnimMesh                m_anim;
-    meshdeform::Targets     m_tgt;
-    int                     m_joints;
-    Model                   m_rayModel;
+    glm::vec3 const         *m_pPosIn;
+    glm::vec3 const         *m_pNrmIn;
 
+    std::vector<glm::vec3>  m_Pos;
+    std::vector<glm::vec3>  m_Nrm;
+
+    meshdeform::Targets     m_tgt;
+    meshdeform::MeshJoints  m_spookM;
+    int                     m_spookId;
+    salad_id_t              m_sockOnId;
+    Mesh                    m_rayMesh;
 };
+
+struct WetJoints : meshdeform::Joints
+{
+    struct Scorpion
+    {
+        glm::mat4x4         m_tf;
+        int                 m_jointParent;
+        int                 m_jointChild;
+    };
+
+    struct Hopper
+    {
+        int                 m_joint;
+        frog_id_t           m_frog;
+    };
+
+    std::vector<Scorpion>   m_scorpions;
+    std::vector<Hopper>     m_hoppers;
+};
+
+struct CharB
+{
+    RenderTexture           m_eyeTexture;
+    meshdeform::Joints      m_joints;
+};
+
+using Characters_t = std::unordered_map<int, CharB>;
 
 struct TestSceneC
 {
-    Camera3D m_camera;
+    std::vector<SaladModel> m_salads;
+    std::vector<WetJoints>  m_spooks;
+    FrogDyn                 m_frogs;
 
-    //meshdeform::Joints m_spooky;
-    //meshdeform::Targets m_tgt;
+    Characters_t            m_characters;
 
-    tinygltf::Model m_gltf;
-    Mesh m_mesh;
-    Material m_mat;
+    tinygltf::Model         m_gltf;
 
-    RenderTexture2D m_ui;
+    Camera3D                m_camera;
 
-    float m_time = 0.0f;
+    Material                m_mat;
+
+    RenderTexture2D         m_ui;
+
+    float                   m_time{0.0f};
 };
 
 
@@ -54,7 +87,34 @@ static void draw_scene(TestSceneC &rScene)
 
     t += GetFrameTime();
 
-    rScene.m_camera.position = Vector3{ std::sin(t * 3.14159f * 0.1f) * 8.0f, 5.0f, std::cos(t * 3.14159f * 0.1f) * 8.0f };
+    rScene.m_camera.position = Vector3{ std::sin(t * 3.14159f * 0.1f) * 2.0f, 2.0f, std::cos(t * 3.14159f * 0.1f) * 2.0f };
+
+    meshdeform::calculate_joint_transforms(
+            (glm::mat4x4(1.0f)),
+            rScene.m_characters[0].m_joints.m_pInverseBindIn,
+            rScene.m_characters[0].m_joints.m_nodeTf.data(),
+            0,
+            rScene.m_characters[0].m_joints.m_jointTf.size(),
+            rScene.m_characters[0].m_joints.m_jointTf.data());
+
+    for (int i = 0; i < 4; i ++)
+    {
+
+        meshdeform::apply_vertex_transform(
+                rScene.m_characters[0].m_joints,
+                rScene.m_salads[i].m_spookM,
+                rScene.m_salads[i].m_tgt,
+                rScene.m_salads[i].m_pPosIn,
+                rScene.m_salads[i].m_pNrmIn,
+                0,
+                rScene.m_salads[i].m_rayMesh.vertexCount,
+                rScene.m_salads[i].m_Pos.data(),
+                rScene.m_salads[i].m_Nrm.data());
+
+        rlUpdateVertexBuffer(rScene.m_salads[i].m_rayMesh.vboId[0], rScene.m_salads[i].m_rayMesh.vertices, rScene.m_salads[i].m_rayMesh.vertexCount*3*sizeof(float), 0);    // Update vertex position
+        rlUpdateVertexBuffer(rScene.m_salads[i].m_rayMesh.vboId[2], rScene.m_salads[i].m_rayMesh.normals, rScene.m_salads[i].m_rayMesh.vertexCount*3*sizeof(float), 0);     // Update vertex normals
+
+    }
 
     BeginDrawing();
 
@@ -63,10 +123,10 @@ static void draw_scene(TestSceneC &rScene)
         BeginMode3D(rScene.m_camera);
 
             DrawGrid(10, 1.0f);
-            DrawMesh(rScene.m_mesh, rScene.m_mat, MatrixIdentity());
-
-
-
+            DrawMesh(rScene.m_salads[0].m_rayMesh, rScene.m_mat, MatrixIdentity());
+            DrawMesh(rScene.m_salads[1].m_rayMesh, rScene.m_mat, MatrixIdentity());
+            DrawMesh(rScene.m_salads[2].m_rayMesh, rScene.m_mat, MatrixIdentity());
+            DrawMesh(rScene.m_salads[3].m_rayMesh, rScene.m_mat, MatrixIdentity());
 
         EndMode3D();
 
@@ -83,6 +143,142 @@ static void draw_scene(TestSceneC &rScene)
     EndDrawing();
 }
 
+template<typename T>
+struct Burger
+{
+    T const *m_data;
+    std::size_t m_count;
+};
+
+template<typename T>
+Burger<T> drivethrough(tinygltf::Model const& gltf, int accessorId)
+{
+    auto const &access  = gltf.accessors.at(accessorId);
+    auto const &view    = gltf.bufferViews.at(access.bufferView);
+    auto const &buffer  = gltf.buffers.at(view.buffer);
+    assert(view.byteStride == 0);
+    return {reinterpret_cast<T const*>(&buffer.data[view.byteOffset + access.byteOffset]), access.count};
+}
+
+static void metal_bar(
+        tinygltf::Model const&      gltf,
+        int                         nodeId,
+        CharB&                      rChar,
+        std::vector<SaladModel>&    rSalads,
+        std::vector<WetJoints> &    rSpooks,
+        FrogDyn&                    rFrogs)
+{
+    auto const &root = gltf.nodes.at(nodeId);
+
+    int useSkin = -1;
+
+    // load mesh children
+    for (int childId : root.children)
+    {
+        auto const &child = gltf.nodes.at(childId);
+
+        if (child.skin != -1)
+        {
+            if (useSkin == -1)
+            {
+                useSkin = child.skin;
+            }
+            else
+            {
+                assert(useSkin == child.skin);
+            }
+
+            // make a salad model for this node
+            SaladModel &rSalad = rSalads.emplace_back();
+            auto const &mesh = gltf.meshes.at(child.mesh);
+            auto const &prim = mesh.primitives.at(0);
+
+            // Load vertex data
+            {
+                auto posData = drivethrough<glm::vec3>(gltf, prim.attributes.at("POSITION"));
+                rSalad.m_pPosIn = posData.m_data;
+                rSalad.m_Pos.resize(posData.m_count);
+                rSalad.m_rayMesh.vertices = const_cast<float*>(reinterpret_cast<float const*>(rSalad.m_Pos.data())); // LOL!!!
+                //rSalad.m_rayMesh.vertices = const_cast<float*>(reinterpret_cast<float const*>(posData.m_data)); // LOL!!!
+                rSalad.m_rayMesh.vertexCount = posData.m_count;
+            }
+            {
+                auto nrmData = drivethrough<glm::vec3>(gltf, prim.attributes.at("NORMAL"));
+                rSalad.m_pNrmIn = nrmData.m_data;
+                rSalad.m_Nrm.resize(nrmData.m_count);
+                rSalad.m_rayMesh.normals = const_cast<float*>(reinterpret_cast<float const*>(rSalad.m_Nrm.data())); // LOL!!!
+            }
+            {
+                auto jointData = drivethrough<unsigned char>(gltf, prim.attributes.at("JOINTS_0"));
+                rSalad.m_spookM.m_pJointsIn = jointData.m_data;
+            }
+            {
+                auto weightData = drivethrough<float>(gltf, prim.attributes.at("WEIGHTS_0"));
+                rSalad.m_spookM.m_pWeightsIn = weightData.m_data;
+            }
+
+            // Load index data
+            {
+                auto idxData = drivethrough<unsigned short>(gltf, prim.indices);
+                rSalad.m_rayMesh.indices = const_cast<unsigned short*>(idxData.m_data); // LOL!!!!!
+                rSalad.m_rayMesh.triangleCount = idxData.m_count / 3;
+            }
+
+
+            UploadMesh(&rSalad.m_rayMesh, true);
+        }
+        else
+        {
+            std::cout << "no skin?\n";
+        }
+
+        if (child.name.rfind("Eyes") == 0)
+        {
+
+        }
+    }
+
+    // load bones
+
+    auto const &skin = gltf.skins.at(useSkin);
+    int const jointCount = skin.joints.size();
+    auto invBindData = drivethrough<glm::mat4x4>(gltf, skin.inverseBindMatrices);
+
+    rChar.m_joints.m_pInverseBindIn = invBindData.m_data;
+
+    // initialize world transforms
+    rChar.m_joints.m_nodeTf.resize(jointCount);
+    rChar.m_joints.m_jointTf.resize(jointCount);
+    for (int i = 0; i < jointCount; i ++)
+    {
+        glm::mat4x4 const &rInvMatrix = rChar.m_joints.m_pInverseBindIn[i];
+        rChar.m_joints.m_nodeTf[i] = glm::inverse(rInvMatrix);
+    }
+
+}
+
+static void metal_pipe(
+        tinygltf::Model const&      gltf,
+        int                         sceneId,
+        Characters_t&               rChars,
+        std::vector<SaladModel>&    rSalads,
+        std::vector<WetJoints> &    rSpooks,
+        FrogDyn&                    rFrogs)
+{
+    auto const &scene = gltf.scenes.at(sceneId);
+
+    // Load characters
+    for (int nodeId : scene.nodes)
+    {
+        if (gltf.nodes[nodeId].name.rfind("Ch_") == 0)
+        {
+            // yeah, this is a character to load
+            // TODO: multiple character support?
+            CharB &rChar = rChars.emplace(0, CharB{}).first->second;
+            metal_bar(gltf, nodeId, rChar, rSalads, rSpooks, rFrogs);
+        }
+    }
+}
 
 SceneFunc_t gen_test_scene_c()
 {
@@ -108,45 +304,15 @@ SceneFunc_t gen_test_scene_c()
 
     loader.LoadASCIIFromFile(&rScene.m_gltf, &err, &warn, "salad0.gltf");
 
-    auto &rMeshes = rScene.m_gltf.meshes;
-    auto &rAccessors = rScene.m_gltf.accessors;
-    auto &rViews = rScene.m_gltf.bufferViews;
-    auto &rBuffers = rScene.m_gltf.buffers;
-    auto &rSkins = rScene.m_gltf.skins;
-
-    rScene.m_mesh = Mesh();
-
-    {
-    auto &rVrtxAccessor = rAccessors[rMeshes[0].primitives[0].attributes["POSITION"]];
-    rScene.m_mesh.vertexCount = rVrtxAccessor.count;
-    auto &rVrtxView = rViews[rVrtxAccessor.bufferView];
-    rScene.m_mesh.vertices = reinterpret_cast<float*>(&rBuffers[rVrtxView.buffer].data[rVrtxView.byteOffset + rVrtxAccessor.byteOffset]);
-    }
-
-    {
-    auto &rNrmlAccessor = rAccessors[rMeshes[0].primitives[0].attributes["NORMAL"]];
-    auto &rNrmlView = rViews[rNrmlAccessor.bufferView];
-    rScene.m_mesh.normals = reinterpret_cast<float*>(&rBuffers[rNrmlView.buffer].data[rNrmlView.byteOffset + rNrmlAccessor.byteOffset]);
-    }
-
-
-    {
-    auto &rIndxAccessor = rAccessors[rMeshes[0].primitives[0].indices];
-    rScene.m_mesh.triangleCount = rIndxAccessor.count;
-    auto &rIndxView = rViews[rIndxAccessor.bufferView];
-    rScene.m_mesh.indices = reinterpret_cast<unsigned short*>(&rBuffers[rIndxView.buffer].data[rIndxView.byteOffset + rIndxAccessor.byteOffset]);
-    }
-
-    // add targets
+    rScene.m_salads.reserve(10);
+    metal_pipe(rScene.m_gltf, 0, rScene.m_characters, rScene.m_salads, rScene.m_spooks, rScene.m_frogs);
 
     rScene.m_mat = LoadMaterialDefault();
 
     rScene.m_ui = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
 
-    UploadMesh(&rScene.m_mesh, true);
 
-
-    rScene.m_camera.target = Vector3{ 0.0f, 0.0f, 0.0f };
+    rScene.m_camera.target = Vector3{ 0.0f, 1.3f, 0.0f };
     rScene.m_camera.up = Vector3{ 0.0f, 1.0f, 0.0f };
     rScene.m_camera.fovy = 50.0f;
     rScene.m_camera.projection = CAMERA_PERSPECTIVE;

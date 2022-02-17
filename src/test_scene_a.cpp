@@ -25,6 +25,7 @@ struct TestSceneA
 {
     Camera3D m_camera;
 
+    meshdeform::MeshJoints m_meshSpooky;
     meshdeform::Joints m_spooky;
     meshdeform::Targets m_tgt;
     LazyAnimMesh m_animMesh;
@@ -65,6 +66,7 @@ static void draw_scene(TestSceneA &rScene)
 
     meshdeform::apply_vertex_transform(
             rScene.m_spooky,
+            rScene.m_meshSpooky,
             rScene.m_tgt,
             rScene.m_animMesh.m_pPosIn,
             rScene.m_animMesh.m_pNrmIn,
@@ -151,13 +153,13 @@ SceneFunc_t orni::gen_test_scene_a()
     {
     auto &rNrmlAccessor = rAccessors[rMeshes[0].primitives[0].attributes["JOINTS_0"]];
     auto &rNrmlView = rViews[rNrmlAccessor.bufferView];
-    rScene.m_spooky.m_pJointsIn = reinterpret_cast<unsigned char*>(&rBuffers[rNrmlView.buffer].data[rNrmlView.byteOffset + rNrmlAccessor.byteOffset]);
+    rScene.m_meshSpooky.m_pJointsIn = reinterpret_cast<unsigned char*>(&rBuffers[rNrmlView.buffer].data[rNrmlView.byteOffset + rNrmlAccessor.byteOffset]);
     }
 
     {
     auto &rNrmlAccessor = rAccessors[rMeshes[0].primitives[0].attributes["WEIGHTS_0"]];
     auto &rNrmlView = rViews[rNrmlAccessor.bufferView];
-    rScene.m_spooky.m_pWeightsIn = reinterpret_cast<float*>(&rBuffers[rNrmlView.buffer].data[rNrmlView.byteOffset + rNrmlAccessor.byteOffset]);
+    rScene.m_meshSpooky.m_pWeightsIn = reinterpret_cast<float*>(&rBuffers[rNrmlView.buffer].data[rNrmlView.byteOffset + rNrmlAccessor.byteOffset]);
     }
 
     {

@@ -11,11 +11,15 @@
 namespace meshdeform
 {
 
+struct MeshJoints
+{
+    float const         *m_pWeightsIn;
+    unsigned char const *m_pJointsIn;
+};
+
 struct Joints
 {
     glm::mat4x4 const   *m_pInverseBindIn;
-    float const         *m_pWeightsIn;
-    unsigned char const *m_pJointsIn;
 
     std::vector<glm::mat4x4>    m_nodeTf;
     std::vector<glm::mat4x4>    m_jointTf;
@@ -45,6 +49,7 @@ void calculate_joint_transforms(
 
 void apply_vertex_transform(
         Joints const        &joints,
+        MeshJoints const    &meshJoints,
         Targets const&      tgt,
         glm::vec3 const*    pPosIn,
         glm::vec3 const*    pNrmIn,
