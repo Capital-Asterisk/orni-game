@@ -9,8 +9,11 @@
 #include <raymath.h>
 #include <rlgl.h>
 
-#include <memory>
+#include <glm/gtx/transform.hpp>
+
 #include <iostream>
+#include <memory>
+#include <unordered_map>
 
 using namespace frogdyn;
 
@@ -32,6 +35,7 @@ struct SaladModel
     int                     m_spookId;
     salad_id_t              m_sockOnId;
     Mesh                    m_rayMesh;
+    Model                   m_rayModel;
 };
 
 struct WetJoints : meshdeform::Joints
@@ -70,6 +74,9 @@ struct TestSceneC
     Characters_t            m_characters;
 
     tinygltf::Model         m_gltf;
+    std::vector<Image>      m_gltfRayImage;
+    std::vector<Texture>    m_gltfRayTextures;
+    std::vector<Material>   m_gltfRayMaterials;
 
     Camera3D                m_camera;
 
@@ -88,6 +95,9 @@ static void draw_scene(TestSceneC &rScene)
     t += GetFrameTime();
 
     rScene.m_camera.position = Vector3{ std::sin(t * 3.14159f * 0.1f) * 2.0f, 2.0f, std::cos(t * 3.14159f * 0.1f) * 2.0f };
+
+    //rScene.m_characters[0].m_joints.m_nodeTf[3][3].z = std::sin(t * 10.0f) * 0.2f;
+    rScene.m_characters[0].m_joints.m_nodeTf[3] *= glm::scale(glm::vec3{0.998f, 0.998f, 0.998f});
 
     meshdeform::calculate_joint_transforms(
             (glm::mat4x4(1.0f)),
@@ -118,16 +128,15 @@ static void draw_scene(TestSceneC &rScene)
 
     BeginDrawing();
 
-        ClearBackground(Color{ 10, 10, 10, 240 });
+        ClearBackground(Color{ 10, 10, 10, 100 });
 
         BeginMode3D(rScene.m_camera);
 
             DrawGrid(10, 1.0f);
-            DrawMesh(rScene.m_salads[0].m_rayMesh, rScene.m_mat, MatrixIdentity());
-            DrawMesh(rScene.m_salads[1].m_rayMesh, rScene.m_mat, MatrixIdentity());
-            DrawMesh(rScene.m_salads[2].m_rayMesh, rScene.m_mat, MatrixIdentity());
-            DrawMesh(rScene.m_salads[3].m_rayMesh, rScene.m_mat, MatrixIdentity());
-
+            DrawModel(rScene.m_salads[0].m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+            DrawModel(rScene.m_salads[1].m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+            DrawModel(rScene.m_salads[2].m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+            DrawModel(rScene.m_salads[3].m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
         EndMode3D();
 
         BeginTextureMode(rScene.m_ui);
@@ -160,12 +169,15 @@ Burger<T> drivethrough(tinygltf::Model const& gltf, int accessorId)
     return {reinterpret_cast<T const*>(&buffer.data[view.byteOffset + access.byteOffset]), access.count};
 }
 
+static int zero_workaround_lol = 0;
+
 static void metal_bar(
         tinygltf::Model const&      gltf,
         int                         nodeId,
         CharB&                      rChar,
         std::vector<SaladModel>&    rSalads,
         std::vector<WetJoints> &    rSpooks,
+        std::vector<Material>&      rMaterials,
         FrogDyn&                    rFrogs)
 {
     auto const &root = gltf.nodes.at(nodeId);
@@ -188,6 +200,7 @@ static void metal_bar(
                 assert(useSkin == child.skin);
             }
 
+
             // make a salad model for this node
             SaladModel &rSalad = rSalads.emplace_back();
             auto const &mesh = gltf.meshes.at(child.mesh);
@@ -209,6 +222,10 @@ static void metal_bar(
                 rSalad.m_rayMesh.normals = const_cast<float*>(reinterpret_cast<float const*>(rSalad.m_Nrm.data())); // LOL!!!
             }
             {
+                auto txCrdData = drivethrough<float>(gltf, prim.attributes.at("TEXCOORD_0"));
+                rSalad.m_rayMesh.texcoords = const_cast<float*>(txCrdData.m_data);
+            }
+            {
                 auto jointData = drivethrough<unsigned char>(gltf, prim.attributes.at("JOINTS_0"));
                 rSalad.m_spookM.m_pJointsIn = jointData.m_data;
             }
@@ -226,6 +243,14 @@ static void metal_bar(
 
 
             UploadMesh(&rSalad.m_rayMesh, true);
+            rSalad.m_rayModel = {};
+            rSalad.m_rayModel.transform = MatrixIdentity();
+            rSalad.m_rayModel.meshCount = 1;
+            rSalad.m_rayModel.meshes = &rSalad.m_rayMesh;
+
+            rSalad.m_rayModel.materialCount = 1;
+            rSalad.m_rayModel.materials = &rMaterials.at(mesh.primitives.at(0).material);
+            rSalad.m_rayModel.meshMaterial = &zero_workaround_lol;
         }
         else
         {
@@ -263,6 +288,7 @@ static void metal_pipe(
         Characters_t&               rChars,
         std::vector<SaladModel>&    rSalads,
         std::vector<WetJoints> &    rSpooks,
+        std::vector<Material>&      rMaterials,
         FrogDyn&                    rFrogs)
 {
     auto const &scene = gltf.scenes.at(sceneId);
@@ -275,7 +301,7 @@ static void metal_pipe(
             // yeah, this is a character to load
             // TODO: multiple character support?
             CharB &rChar = rChars.emplace(0, CharB{}).first->second;
-            metal_bar(gltf, nodeId, rChar, rSalads, rSpooks, rFrogs);
+            metal_bar(gltf, nodeId, rChar, rSalads, rSpooks, rMaterials, rFrogs);
         }
     }
 }
@@ -290,22 +316,43 @@ SceneFunc_t gen_test_scene_c()
 
     tinygltf::TinyGLTF loader;
 
+    rScene.m_gltfRayImage.resize(10);
     loader.SetImageLoader([] (
             tinygltf::Image *img, const int index,
             std::string *pErr, std::string *pWarn, int foo, int bar,
             const unsigned char *pData, int size, void *pUser) -> bool
     {
-        Image rayImg = LoadImageFromMemory(".png", pData, size);
+        auto *pImages = reinterpret_cast<std::vector<Image>*>(pUser);
+        pImages->at(index) = LoadImageFromMemory(".png", pData, size);
         return true;
-    }, nullptr);
+    }, &rScene.m_gltfRayImage);
 
     //image, image_idx, err, warn, 0, 0, &img.at(0),
     //static_cast<int>(img.size()), load_image_user_data);
 
     loader.LoadASCIIFromFile(&rScene.m_gltf, &err, &warn, "salad0.gltf");
 
+    // load textures
+    rScene.m_gltfRayTextures.reserve(rScene.m_gltf.textures.size());
+    for (auto const &tex : rScene.m_gltf.textures)
+    {
+        rScene.m_gltfRayTextures.push_back(LoadTextureFromImage(rScene.m_gltfRayImage[tex.source]));
+    }
+
+    // load materials
+    rScene.m_gltfRayMaterials.reserve(rScene.m_gltf.materials.size());
+    for (auto const &mat : rScene.m_gltf.materials)
+    {
+        Material &rMat = rScene.m_gltfRayMaterials.emplace_back(LoadMaterialDefault());
+        if (auto it = mat.values.find("baseColorTexture"); it != mat.values.end())
+        {
+            int texId = it->second.json_double_value.at("index");
+            SetMaterialTexture(&rMat, MATERIAL_MAP_DIFFUSE, rScene.m_gltfRayTextures[texId]);
+        }
+    }
+
     rScene.m_salads.reserve(10);
-    metal_pipe(rScene.m_gltf, 0, rScene.m_characters, rScene.m_salads, rScene.m_spooks, rScene.m_frogs);
+    metal_pipe(rScene.m_gltf, 0, rScene.m_characters, rScene.m_salads, rScene.m_spooks, rScene.m_gltfRayMaterials, rScene.m_frogs);
 
     rScene.m_mat = LoadMaterialDefault();
 
