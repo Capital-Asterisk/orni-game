@@ -10,6 +10,7 @@
 #include <longeron/id_management/registry.hpp>
 
 #include <vector>
+#include <variant>
 
 namespace frogdyn
 {
@@ -41,6 +42,11 @@ struct FrogDyn
         };
 
         Insect m_a, m_b;
+
+        float m_angMax;
+
+        bool m_doLimTwist;
+        bool m_doLimCone;
     };
 
     struct AABB
@@ -102,5 +108,7 @@ void apply_cst_forces(FrogDyn &rDyn, float delta);
 void calc_balls_pos(FrogDyn &rDyn);
 BallContact calc_ball_collisions(BallCollisions_t a, BallCollisions_t b);
 void calc_frog_collisions(FrogDyn &rDyn);
+frog_id_t add_frog(FrogDyn &rDyn, glm::mat4x4 const& tf, float mass);
+
 
 }

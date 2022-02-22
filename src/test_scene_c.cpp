@@ -71,20 +71,23 @@ struct SaladModel
 
 struct WetJoints : meshdeform::Joints
 {
+    // Controls a Bait and a Joint with a frog parent
     struct Scorpion
     {
+        frog_id_t           m_frog;
         glm::mat4x4         m_tf;
-        int                 m_jointParent;
-        int                 m_jointChild;
+        int                 m_joint;
     };
 
+    // frog directly controls a Joint
     struct Hopper
     {
-        int                 m_joint;
         frog_id_t           m_frog;
+        int                 m_joint;
+        float               m_yoffset;
     };
 
-    std::vector<Scorpion>   m_scorpions;
+    std::vector<Scorpion>   m_scorpions; // order-dependent
     std::vector<Hopper>     m_hoppers;
 };
 
@@ -96,6 +99,7 @@ struct CharB
         glm::ivec2          m_irisPos;
     };
 
+
     Material                m_eyeMaterial;
     Texture                 m_eyeSheet;
     RenderTexture           m_eyeTexture;
@@ -103,6 +107,8 @@ struct CharB
     Eye                     m_eyeR;
 
     meshdeform::Joints      m_joints;
+    WetJoints               m_wetJoints;
+
 };
 
 using Characters_t = std::unordered_map<int, CharB>;
@@ -123,13 +129,17 @@ struct TestSceneC
 
     Camera3D                m_camera;
 
+    Mesh                    m_cube;
     Material                m_mat;
 
     RenderTexture2D         m_ui;
 
-    float m_camDist = 16.0f;
-    float m_camYaw= 0.0f;
-     float m_camPitch= 0.0f;
+    int                     m_cstSteps = 12;
+    float                   m_extPercent = 0.5f;
+
+    float                   m_camDist{3.0f};
+    float                   m_camYaw{0.0f};
+    float                   m_camPitch{0.0f};
     float                   m_time{0.0f};
 };
 
@@ -168,15 +178,15 @@ static void draw_iris(Texture2D texture, int i, glm::vec2 pos)
 {
     constexpr float const w = 128.0f, h = 128.0f, r = 64.0f, c = 32.0f;
 
-    pos.x = glm::clamp(pos.x * -r, -c, c);
-    pos.y = glm::clamp(pos.y * r, -c, c);
+    float const len = glm::min(glm::length(pos) * r, c);
+    pos = glm::normalize(pos) * glm::vec2{-1.0f, 1.0f} * len;
 
     float const x = 128 * i, y = 128;
     float const xlapP = glm::clamp(pos.x, 0.0f, w);
     float const xlapN = glm::clamp(pos.x, -w, 0.0f);
     DrawTexturePro(texture,
-                   Rectangle{-xlapN,                0,      w - xlapP + xlapN,  -h},
-                   Rectangle{x + pos.x - xlapN,     y + pos.y,  w - xlapP + xlapN,  h},
+                   Rectangle{-xlapN,            0,          w - xlapP + xlapN,  -h},
+                   Rectangle{x + pos.x - xlapN, y + pos.y,  w - xlapP + xlapN,  h},
                    Vector2{0, 0}, 0.0f, WHITE);
 }
 
@@ -189,13 +199,13 @@ static void draw_scene(TestSceneC &rScene)
 
     rScene.m_camYaw += (float(IsKeyDown(KEY_RIGHT)) - float(IsKeyDown(KEY_LEFT))) * delta * 3.14159f;
     rScene.m_camPitch += (float(IsKeyDown(KEY_UP)) - float(IsKeyDown(KEY_DOWN))) * delta * 3.14159f;
-    rScene.m_camDist += (float(IsKeyDown(KEY_Z)) - float(IsKeyDown(KEY_X))) * delta * 10.0f;
+    rScene.m_camDist += (float(IsKeyDown(KEY_Z)) - float(IsKeyDown(KEY_X))) * delta * 2.0f;
 
     reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
     //rScene.m_camera.position = Vector3{ std::sin(rScene.m_camAngle) * rScene.m_camDist, 3.0f, std::cos(rScene.m_camAngle) * rScene.m_camDist };
     //rScene.m_camera.position = Vector3{ std::sin(t * 3.14159f * 0.1f) * 2.0f, 2.0f, std::cos(t * 3.14159f * 0.1f) * 2.0f };
 
-    rScene.m_characters[0].m_joints.m_nodeTf[3] *= glm::axisAngleMatrix(glm::vec3{1.0f, 0.0f, 0.0f}, std::sin(t * glm::pi<float>() * 2.0f * 2.066666f) * 0.1f);
+    //rScene.m_characters[0].m_joints.m_nodeTf[3] *= glm::axisAngleMatrix(glm::vec3{1.0f, 0.0f, 0.0f}, std::sin(t * glm::pi<float>() * 2.0f * 2.066666f) * 0.1f);
     //rScene.m_characters[0].m_joints.m_nodeTf[3] *= glm::scale(glm::vec3{0.998f, 0.998f, 0.998f});
 
     CharB &rChar = rScene.m_characters.begin()->second;
@@ -206,13 +216,69 @@ static void draw_scene(TestSceneC &rScene)
     glm::vec2 eyePosR = calc_eye_pos(rScene.m_apples.m_dataOut[rChar.m_eyeR.m_apple], reinterpret_cast<glm::vec3&>(rScene.m_camera.position));
 
 
+    float pushMag = (float(IsKeyDown(KEY_D)) - float(IsKeyDown(KEY_A))) * delta * 5.0f;
+
+    glm::vec3 const push = glm::vec3{
+                glm::sin(rScene.m_camYaw + 1.5708f),
+                0.0f,
+                glm::cos(rScene.m_camYaw + 1.5708f)} * pushMag;
+
+    if (IsKeyDown(KEY_SPACE))
+    {
+        for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
+        {
+            rScene.m_frogs.m_vel[i].m_lin *= 0.50f;
+        }
+    }
+
+
+    if (IsKeyDown(KEY_LEFT_ALT))
+    {
+        for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
+        {
+            rScene.m_frogs.m_vel[i].m_ang *= 0.50f;
+        }
+    }
+
+    for (int i = 0; i < 1; i ++)
+    {
+        // apply gravity
+        //rScene.m_frogs.m_extImp[i].m_lin.y -= 9.81f * delta * rScene.m_frogs.m_mass[i];
+
+        rScene.m_frogs.m_extImp[i].m_lin += push;
+
+        auto p = glm::vec3(rScene.m_frogs.m_tf[i][3]);
+    }
+
+    float const cstPercent = 1.0f - rScene.m_extPercent;
+
+    apply_ext_forces(rScene.m_frogs, delta * rScene.m_extPercent);
+
+    // repeat constrain forces a few times
+    for (int j = 0; j < rScene.m_cstSteps; j++)
+    {
+
+        apply_baits(rScene.m_frogs);
+
+        apply_cst_forces(rScene.m_frogs, delta * cstPercent / float(rScene.m_cstSteps));
+
+        calc_balls_pos(rScene.m_frogs);
+
+        calc_frog_collisions(rScene.m_frogs);
+    }
+
+    for (WetJoints::Hopper const& hopper : rChar.m_wetJoints.m_hoppers)
+    {
+        rChar.m_joints.m_nodeTf.at(hopper.m_joint) = glm::translate(rScene.m_frogs.m_tf.at(hopper.m_frog), glm::vec3{0, hopper.m_yoffset, 0});
+    }
+
     meshdeform::calculate_joint_transforms(
-            (glm::mat4x4(1.0f)),
-            rScene.m_characters[0].m_joints.m_pInverseBindIn,
-            rScene.m_characters[0].m_joints.m_nodeTf.data(),
+            glm::mat4x4(1.0f),
+            rChar.m_joints.m_pInverseBindIn,
+            rChar.m_joints.m_nodeTf.data(),
             0,
-            rScene.m_characters[0].m_joints.m_jointTf.size(),
-            rScene.m_characters[0].m_joints.m_jointTf.data());
+            rChar.m_joints.m_jointTf.size(),
+            rChar.m_joints.m_jointTf.data());
 
     for (int i = 0; i < 4; i ++)
     {
@@ -278,20 +344,89 @@ static void draw_scene(TestSceneC &rScene)
         BeginTextureMode(rScene.m_ui);
             ClearBackground(Color{ 0, 0, 0, 0 });
 
-            BeginMode3D(rScene.m_camera);
-            DrawSphere(Vector3{0.0f, 0.0f, 0.0f}, 0.05f, Color{255, 0, 0, 255});
-            if (glm::mod(t, 0.5f) < 0.5f/2.0f && false)
-            {
-                DrawSphere(reinterpret_cast<Vector3&>(rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple][3]), 0.01f, GREEN);
-            }
 
+            BeginMode3D(rScene.m_camera);
+/*
+                glm::vec3 avgPos{0.0f};
+                float totalMass = 0.0f;
+                // draw frogs
+                for (frog_id_t id = 0; id < rScene.m_frogs.m_ids.capacity(); id ++)
+                {
+                    if (!rScene.m_frogs.m_ids.exists(id))
+                    {
+                        continue;
+                    }
+                    avgPos += glm::vec3(rScene.m_frogs.m_tf[id][3]) * rScene.m_frogs.m_mass[id];
+                    totalMass += rScene.m_frogs.m_mass[id];
+
+                    auto tf = rScene.m_frogs.m_tf[id];
+                    auto transposed = glm::transpose(tf);
+
+                    auto tip = glm::vec3(tf[3] - tf[1] * 0.5f);
+                    auto tail = glm::vec3(tf[3] + tf[1] * 0.5f);
+
+                    DrawMesh(rScene.m_cube, rScene.m_mat, reinterpret_cast<Matrix&>(transposed));
+
+                    // draw the balls if the frog has balls
+                    if (rScene.m_frogs.m_ballPos.contains(id))
+                    {
+                        // loop throught the balls
+                        for (auto& ball : rScene.m_frogs.m_ballPos[id])
+                        {
+                            DrawSphereWires(reinterpret_cast<Vector3&>(ball.m_pos), ball.m_radius, 5, 6, Color{255, 255, 255, 255});
+                        }
+                    }
+                }
+
+                // draw baits
+                for (int i = 0; i < rScene.m_frogs.m_baits.size(); i ++)
+                {
+                    auto const &rBait = rScene.m_frogs.m_baits[i];
+                    glm::vec3 posA, velA, posB, velB;
+
+                    if (rBait.m_a.m_id == -1)
+                    {
+                        // world-anchored
+                        posA = rBait.m_a.m_offset;
+                        velA = glm::vec3{0.0f};
+                    }
+                    else
+                    {
+                        glm::vec3 const offsetRotated(rScene.m_frogs.m_tf[rBait.m_a.m_id] * glm::vec4(rBait.m_a.m_offset, 0.0f));
+                        posA = offsetRotated + glm::vec3(rScene.m_frogs.m_tf[rBait.m_a.m_id][3]);
+                    }
+
+                    glm::vec3 const offsetRotated(rScene.m_frogs.m_tf[rBait.m_b.m_id] * glm::vec4(rBait.m_b.m_offset, 0.0f));
+                    posB = offsetRotated + glm::vec3(rScene.m_frogs.m_tf[rBait.m_b.m_id][3]);
+
+                    DrawSphereWires(reinterpret_cast<Vector3&>(posA), 0.01f, 2, 4, Color{255, 0, 0, 255});
+                    DrawSphere(reinterpret_cast<Vector3&>(posB), 0.005f, Color{0, 0, 255, 255});
+
+
+                    if (rBait.m_a.m_id != -1)
+                    {
+                        Vector3 origA = reinterpret_cast<Vector3&>(rScene.m_frogs.m_tf[rBait.m_a.m_id][3]);
+                        DrawLine3D(origA, reinterpret_cast<Vector3&>(posA), Color{255, 0, 0, 255});
+                    }
+                    Vector3 origB = reinterpret_cast<Vector3&>(rScene.m_frogs.m_tf[rBait.m_b.m_id][3]);
+                    DrawLine3D(origB, reinterpret_cast<Vector3&>(posB), Color{0, 0, 255, 255});
+
+                }
+
+                DrawSphere(Vector3{0.0f, 0.0f, 0.0f}, 0.05f, Color{255, 0, 0, 255});
+                if (glm::mod(t, 0.5f) < 0.5f/2.0f)
+                {
+                    DrawSphere(reinterpret_cast<Vector3&>(rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple][3]), 0.01f, GREEN);
+                }
+
+                */
             EndMode3D();
 
             DrawRectangle(10, 10, 50, 25, Color{255, 255, 255, 255});
 
             DrawRectangle(10, 35, 50, 25, Color{203, 194, 201, 255});
 
-            DrawTexture(rChar.m_eyeTexture.texture, 0, 0, WHITE);
+            //DrawTexture(rChar.m_eyeTexture.texture, 0, 0, WHITE);
 
             BeginBlendMode(BLEND_CUSTOM);
             rlSetBlendFactors(0, 770, 32774);
@@ -336,25 +471,71 @@ static glm::mat4 node_transform(tinygltf::Node const& node)
 
 static int zero_workaround_lol = 0;
 
-static void metal_rod(std::vector<int> const& jointToNodes, tinygltf::Model const& gltf, int nodeId, Apples& rApples, CharB& rChar, glm::mat4x4 currTf)
+static void metal_rod(
+        std::vector<int> const& nodeToJoint,
+        tinygltf::Model const& gltf,
+        int nodeId,
+        int parentId,
+        int level,
+        FrogDyn& rFrogs,
+        Apples& rApples,
+        CharB& rChar,
+        glm::mat4x4 parentTfWorld)
 {
     auto const &node = gltf.nodes[nodeId];
+
+    glm::mat4x4 const nodeTf = node_transform(node);
+    glm::mat4x4 const nodeTfWorld = parentTfWorld * nodeTf;
+
+    // check for mass
+    if (node.extras.IsObject()) // wtf?
+    {
+        float comwok = 0.12f;
+
+        if (tinygltf::Value const& massVal = node.extras.Get("mass"); massVal.IsNumber())
+        {
+            float mass = massVal.GetNumberAsDouble();
+            std::cout << "MASSSS! " << mass << "\n";
+
+            // Make a frog
+            glm::mat4x4 frogTfWorld = nodeTfWorld;
+            frogTfWorld[3] += frogTfWorld[1] * comwok;
+            frog_id_t const frogId = frogdyn::add_frog(rFrogs, frogTfWorld, mass);
+
+            // Add hopper
+            rChar.m_wetJoints.m_hoppers.emplace_back(WetJoints::Hopper{frogId, nodeToJoint[nodeId], -comwok});
+
+            // connect to parent
+            if (level != 0)
+            {
+                int const parentJoint = nodeToJoint[parentId];
+                assert(parentJoint != -1);
+                auto foundIt = std::find_if(rChar.m_wetJoints.m_hoppers.begin(), rChar.m_wetJoints.m_hoppers.end(), [parentJoint] (WetJoints::Hopper const &wet) -> bool { return wet.m_joint == parentJoint; });
+                assert(foundIt != rChar.m_wetJoints.m_hoppers.end());
+                frog_id_t const parentFrogId = foundIt->m_joint;
+                glm::vec3 offset{0.0f, -comwok, 0.0f};
+                rFrogs.m_baits.emplace_back(
+                            FrogDyn::Bait{ {parentFrogId, glm::vec3{nodeTf[3]} + offset},
+                                           {frogId,   offset} });
+            }
+        }
+    }
 
     for (int childId : node.children)
     {
         auto const &child = gltf.nodes.at(childId);
 
-        if (jointToNodes[childId] == -1)
+        if (nodeToJoint[childId] == -1)
         {
             // Not bone
 
             if (child.name.rfind("Apl_EyeL") == 0)
             {
-                rChar.m_eyeL.m_apple = rApples.create(Apple{ node_transform(child), jointToNodes[nodeId] });
+                rChar.m_eyeL.m_apple = rApples.create(Apple{ node_transform(child), nodeToJoint[nodeId] });
             }
             else if (child.name.rfind("Apl_EyeR") == 0)
             {
-                rChar.m_eyeR.m_apple = rApples.create(Apple{ node_transform(child), jointToNodes[nodeId] });
+                rChar.m_eyeR.m_apple = rApples.create(Apple{ node_transform(child), nodeToJoint[nodeId] });
             }
         }
         else
@@ -363,7 +544,7 @@ static void metal_rod(std::vector<int> const& jointToNodes, tinygltf::Model cons
 
             std::cout << child.name << "\n";
 
-            metal_rod(jointToNodes, gltf, childId, rApples, rChar, currTf);
+            metal_rod(nodeToJoint, gltf, childId, nodeId, level + 1, rFrogs, rApples, rChar, nodeTfWorld);
         }
     }
 }
@@ -504,7 +685,7 @@ static void metal_bar(
     }
 
     // Iterate bones
-    metal_rod(nodeToJoint, gltf, nodeId, rApples, rChar, glm::mat4x4(1.0f));
+    metal_rod(nodeToJoint, gltf, nodeId, -1, -1, rFrogs, rApples, rChar, glm::mat4x4(1.0f));
 }
 
 static void metal_pipe(
@@ -558,6 +739,15 @@ SceneFunc_t gen_test_scene_c()
 
     loader.LoadASCIIFromFile(&rScene.m_gltf, &err, &warn, "salad0.gltf");
 
+    // funny patch LOL!!!
+    for (auto &rNode : rScene.m_gltf.nodes)
+    {
+        if (rNode.skin != -1)
+        {
+            rNode.skin = 0;
+        }
+    }
+
     // load textures
     rScene.m_gltfRayTextures.reserve(rScene.m_gltf.textures.size());
     for (auto const &tex : rScene.m_gltf.textures)
@@ -580,6 +770,7 @@ SceneFunc_t gen_test_scene_c()
     rScene.m_salads.reserve(10);
     metal_pipe(rScene.m_gltf, 0, rScene.m_characters, rScene.m_salads, rScene.m_apples, rScene.m_spooks, rScene.m_gltfRayMaterials, rScene.m_frogs);
 
+    rScene.m_cube = GenMeshCube(0.04545f, 0.1f, 0.01136f);
     rScene.m_mat = LoadMaterialDefault();
 
     rScene.m_ui = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());

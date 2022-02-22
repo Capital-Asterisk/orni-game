@@ -50,8 +50,8 @@ void frogdyn::apply_baits(FrogDyn &rDyn)
         glm::vec3 const     velRel  = velB - velA;
 
         // PD control lol what
-        glm::vec3 const     p   = posRel * 32.0f;
-        glm::vec3 const     d   = velRel * 0.5f;
+        glm::vec3 const     p   = posRel * 5.0f;
+        glm::vec3 const     d   = velRel * 0.1f;
 
         float const lenBSq = glm::length2(rBait.m_b.m_offset);
         float const lenASq = glm::length2(rBait.m_a.m_offset);
@@ -60,7 +60,7 @@ void frogdyn::apply_baits(FrogDyn &rDyn)
         float const maxLen  = glm::max(lenASq, lenBSq);
 
         glm::vec3 const totalLinImp = (p + d) * minMass;
-        glm::vec3 const totalAngImp = totalLinImp * 1.1f / (maxLen + 1.0f);
+        glm::vec3 const totalAngImp = totalLinImp * 0.8f;
 
         if (rBait.m_a.m_id != -1)
         {
@@ -248,4 +248,24 @@ void frogdyn::calc_frog_collisions(FrogDyn &rDyn)
             }
         }
     }
+}
+
+frog_id_t frogdyn::add_frog(FrogDyn &rDyn, glm::mat4x4 const& tf, float mass)
+{
+    frog_id_t const id = rDyn.m_ids.create();
+    std::size_t const capacity = rDyn.m_ids.capacity();
+    rDyn.m_cstImp   .resize(capacity);
+    rDyn.m_extImp   .resize(capacity);
+    rDyn.m_vel      .resize(capacity);
+    rDyn.m_mass     .resize(capacity);
+    rDyn.m_tf       .resize(capacity);
+    rDyn.m_scale    .resize(capacity);
+    rDyn.m_aabb     .resize(capacity);
+    rDyn.m_balls    .resize_ids(capacity);
+
+    rDyn.m_scale[id]    = 1.0f;
+    rDyn.m_mass[id]     = mass;
+    rDyn.m_tf[id]       = tf;
+
+    return id;
 }

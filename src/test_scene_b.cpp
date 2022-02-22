@@ -216,26 +216,6 @@ static void draw_scene(TestSceneB &rScene)
 
 
 
-frog_id_t add_frog(FrogDyn &rDyn, glm::mat4x4 const& tf, float mass)
-{
-    frog_id_t const id = rDyn.m_ids.create();
-    std::size_t const capacity = rDyn.m_ids.capacity();
-    rDyn.m_cstImp   .resize(capacity);
-    rDyn.m_extImp   .resize(capacity);
-    rDyn.m_vel      .resize(capacity);
-    rDyn.m_mass     .resize(capacity);
-    rDyn.m_tf       .resize(capacity);
-    rDyn.m_scale    .resize(capacity);
-    rDyn.m_aabb     .resize(capacity);
-    rDyn.m_balls    .resize_ids(capacity);
-
-    rDyn.m_scale[id]    = 1.0f;
-    rDyn.m_mass[id]     = mass;
-    rDyn.m_tf[id]       = tf;
-
-    return id;
-}
-
 
 SceneFunc_t orni::gen_test_scene_b()
 {
@@ -263,8 +243,8 @@ SceneFunc_t orni::gen_test_scene_b()
                                {0,   {0.0f, 1.0f, 0.0f}} });
 
     rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {0,  {0.0f, -1.0f, 0.0f}},
-                               {1,   {0.0f, 1.0f, 0.0f}} });
+                FrogDyn::Bait{ {0,  {0.0f, 0.0f, 0.0f}},
+                               {1,   {0.0f, 2.0f, 0.0f}} });
 
     rScene.m_frogs.m_baits.emplace_back(
                 FrogDyn::Bait{ {1,   {0.0f, -1.0f, 0.0f}},

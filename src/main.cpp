@@ -34,6 +34,10 @@ void update_draw_frame()
     {
         g_sceneFunc = orni::gen_test_scene_b_b();
     }
+    else if (IsKeyDown(KEY_FOUR))
+    {
+        g_sceneFunc = orni::gen_test_scene_c();
+    }
     g_sceneFunc(g_gameState);
 }
 
