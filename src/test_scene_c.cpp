@@ -257,10 +257,11 @@ static void draw_scene(TestSceneC &rScene)
     // repeat constrain forces a few times
     for (int j = 0; j < rScene.m_cstSteps; j++)
     {
+        float smldelta = delta * cstPercent / float(rScene.m_cstSteps);
 
-        apply_baits(rScene.m_frogs);
+        apply_baits(rScene.m_frogs, {16.0f, 0.1f}, smldelta);
 
-        apply_cst_forces(rScene.m_frogs, delta * cstPercent / float(rScene.m_cstSteps));
+        apply_cst_forces(rScene.m_frogs, smldelta);
 
         calc_balls_pos(rScene.m_frogs);
 

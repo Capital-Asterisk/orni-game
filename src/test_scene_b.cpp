@@ -104,10 +104,11 @@ static void draw_scene(TestSceneB &rScene)
             // repeat constrain forces a few times
             for (int j = 0; j < rScene.m_cstSteps; j++)
             {
+                float smldelta = delta * cstPercent / float(rScene.m_cstSteps);
 
-                apply_baits(rScene.m_frogs);
+                apply_baits(rScene.m_frogs, {16.0f, 0.1f}, smldelta);
 
-                apply_cst_forces(rScene.m_frogs, delta * cstPercent / float(rScene.m_cstSteps));
+                apply_cst_forces(rScene.m_frogs, smldelta);
 
                 calc_balls_pos(rScene.m_frogs);
 
@@ -226,7 +227,7 @@ SceneFunc_t orni::gen_test_scene_b()
     rScene.m_cstSteps = 8;
 
     rScene.m_mat = LoadMaterialDefault();
-    rScene.m_cube = GenMeshCube(0.5f, 0.5f, 0.5f);
+    rScene.m_cube = GenMeshCube(0.04545f * 10.0f, 0.1f * 10.0f, 0.01136f * 10.0f);
     rScene.m_ui = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
 
     add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 0.1f );
@@ -237,22 +238,25 @@ SceneFunc_t orni::gen_test_scene_b()
 
     add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {0.0f, 1.0f, 0.0f}), 1.5f );
 
+    glm::vec3 const down{0.0f, -1.0f, 0.0f};
+    glm::vec3 const fwd{0.0f, 0.0f, 1.0f};
+
     // global constrained
     rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {-1,  {0.0f, 7.0f, 0.0f}},
-                               {0,   {0.0f, 1.0f, 0.0f}} });
+                FrogDyn::Bait{ {-1,  {0.0f, 7.0f, 0.0f}, down, fwd},
+                               {0,   {0.0f, 1.0f, 0.0f}, down, fwd} });
 
     rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {0,  {0.0f, 0.0f, 0.0f}},
-                               {1,   {0.0f, 2.0f, 0.0f}} });
+                FrogDyn::Bait{ {0,  {0.0f, 0.0f, 0.0f}, down, fwd},
+                               {1,   {0.0f, 2.0f, 0.0f}, down, fwd} });
 
     rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {1,   {0.0f, -1.0f, 0.0f}},
-                               {2,   {0.0f,  1.0f, 0.0f}} });
+                FrogDyn::Bait{ {1,   {0.0f, -1.0f, 0.0f}, down, fwd},
+                               {2,   {0.0f,  1.0f, 0.0f}, down, fwd} });
 
     rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {2,   {0.0f, -1.0f, 0.0f}},
-                               {3,   {0.0f,  1.0f, 0.0f}} });
+                FrogDyn::Bait{ {2,   {0.0f, -1.0f, 0.0f}, down, fwd},
+                               {3,   {0.0f,  1.0f, 0.0f}, down, fwd} });
 
     rScene.m_camera.target = Vector3{ 0.0f, 2.0f, 0.0f };
     rScene.m_camera.up = Vector3{ 0.0f, 1.0f, 0.0f };
@@ -273,7 +277,7 @@ SceneFunc_t orni::gen_test_scene_b_b()
     rScene.m_cstSteps = 24;
 
     rScene.m_mat = LoadMaterialDefault();
-    rScene.m_cube = GenMeshCube(0.5f, 0.5f, 0.5f);
+    rScene.m_cube = GenMeshCube(0.04545f * 10.0f, 0.1f * 10.0f, 0.01136f * 10.0f);
     rScene.m_ui = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
 
     add_frog(rScene.m_frogs, glm::translate(glm::mat4x4{1.0f}, {1.0f, 1.0f, 0.0f}), 6.0f );
@@ -306,21 +310,24 @@ SceneFunc_t orni::gen_test_scene_b_b()
     rScene.m_frogs.m_balls.emplace(3, { {{0.0f, 0.0f, 0.0f}, 0.7f, 1, 1} });
     rScene.m_frogs.m_ballPos.emplace(3, 1);
 
-    rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {-1,  {1.0f, 5.0f, 0.0f}},
-                               {0,   {0.0f, 2.0f, 0.0f}} });
+    glm::vec3 const down{0.0f, -1.0f, 0.0f};
+    glm::vec3 const fwd{0.0f, 0.0f, 1.0f};
 
     rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {0,  {0.0f, -2.0f, 0.0f}},
-                               {1,   {0.0f, 2.0f, 0.0f}} });
+                FrogDyn::Bait{ {-1,  {1.0f, 5.0f, 0.0f}, down, fwd},
+                               {0,   {0.0f, 2.0f, 0.0f}, down, fwd} });
 
     rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {-1,  {-1.0f, 5.0f, 0.0f}},
-                               {2,   {0.0f,  2.0f, 0.0f}} });
+                FrogDyn::Bait{ {0,  {0.0f, -2.0f, 0.0f}, down, fwd},
+                               {1,   {0.0f, 2.0f, 0.0f}, down, fwd} });
 
     rScene.m_frogs.m_baits.emplace_back(
-                FrogDyn::Bait{ {0,   {0.0f, -2.0f, 0.0f}},
-                               {3,   {0.0f,  2.0f, 0.0f}} });
+                FrogDyn::Bait{ {-1,  {-1.0f, 5.0f, 0.0f}, down, fwd},
+                               {2,   {0.0f,  2.0f, 0.0f}, down, fwd} });
+
+    rScene.m_frogs.m_baits.emplace_back(
+                FrogDyn::Bait{ {0,   {0.0f, -2.0f, 0.0f}, down, fwd},
+                               {3,   {0.0f,  2.0f, 0.0f}, down, fwd} });
 
     rScene.m_camera.target = Vector3{ 0.0f, 2.0f, 0.0f };
     rScene.m_camera.up = Vector3{ 0.0f, 1.0f, 0.0f };

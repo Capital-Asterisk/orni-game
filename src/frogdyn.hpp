@@ -5,6 +5,7 @@
 #pragma once
 
 #include <glm/mat4x4.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <longeron/containers/intarray_multimap.hpp>
 #include <longeron/id_management/registry.hpp>
@@ -16,6 +17,17 @@ namespace frogdyn
 {
 
 using frog_id_t = int;
+
+struct AABB
+{
+    glm::vec3 m_min, m_max;
+};
+
+struct LinAng
+{
+    glm::vec3 m_lin;
+    glm::vec3 m_ang;
+};
 
 struct FrogDyn
 {
@@ -39,19 +51,29 @@ struct FrogDyn
         {
             frog_id_t   m_id;
             glm::vec3   m_offset;
+
+            // A->B
+            glm::vec3 m_dir;
+            glm::vec3 m_side;
         };
+
+        Bait(Insect a, Insect b) : m_a{a}, m_b{b} { }
 
         Insect m_a, m_b;
 
-        float m_angMax;
+        // rotation needed to rotate B into A's space
+        glm::quat m_origin{};
 
-        bool m_doLimTwist;
-        bool m_doLimCone;
-    };
+        float m_limSway;
+        float m_limMax;
 
-    struct AABB
-    {
-        glm::vec3 m_min, m_max;
+        float m_springSway;
+        float m_springMax;
+
+        bool m_doLimTwist{false};
+        bool m_doLimCone{false};
+        bool m_doSpringTwist{false};
+        bool m_doSpringCone{false};
     };
 
     struct CollisionCheck
@@ -59,11 +81,7 @@ struct FrogDyn
         frog_id_t m_a, m_b;
     };
 
-    struct LinAng
-    {
-        glm::vec3 m_lin;
-        glm::vec3 m_ang;
-    };
+
 
     lgrn::IdRegistry<frog_id_t> m_ids;
     std::vector<glm::mat4x4>    m_tf;
@@ -95,14 +113,20 @@ struct BallContact
     int         m_count{0};
 };
 
-constexpr bool aabb_intersect(FrogDyn::AABB const& a, FrogDyn::AABB const& b) noexcept
+constexpr bool aabb_intersect(AABB const& a, AABB const& b) noexcept
 {
     return     (a.m_min.x < b.m_max.x) && (a.m_max.x > b.m_min.x)
             && (a.m_min.y < b.m_max.y) && (a.m_max.y > b.m_min.y)
             && (a.m_min.z < b.m_max.z) && (a.m_max.z > b.m_min.z);
 }
 
-void apply_baits(FrogDyn &rDyn);
+struct BaitOptions
+{
+    float m_linP, m_linD;
+    float m_angP, m_angD;
+};
+
+void apply_baits(FrogDyn &rDyn, BaitOptions opt, float delta);
 void apply_ext_forces(FrogDyn &rDyn, float delta);
 void apply_cst_forces(FrogDyn &rDyn, float delta);
 void calc_balls_pos(FrogDyn &rDyn);

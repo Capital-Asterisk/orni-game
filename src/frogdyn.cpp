@@ -6,71 +6,79 @@
 
 #include <glm/gtx/norm.hpp>
 #include <glm/gtx/matrix_interpolation.hpp>
+#include <glm/gtx/vector_angle.hpp>
+#include <glm/gtx/projection.hpp>
+
+#include <iostream>
 
 using namespace frogdyn;
 
-void frogdyn::apply_baits(FrogDyn &rDyn)
+void frogdyn::apply_baits(FrogDyn &rDyn, BaitOptions opt, float delta)
 {
+    static glm::mat4x4 const mcidentity{1.0f};
+    static LinAng const linAngZero{};
+
     // calculate baits
     for (int i = 0; i < rDyn.m_baits.size(); i ++)
     {
         auto const &rBait = rDyn.m_baits[i];
-        glm::vec3 posA, velA, posB, velB, offsetRotA, offsetRotB;
-        float massA, massB;
 
-        if (rBait.m_a.m_id == -1)
-        {
-            // world-anchored
-            offsetRotA = rBait.m_a.m_offset;
-            posA = rBait.m_a.m_offset;
-            velA = glm::vec3{0.0f};
-            massA = 9999999.0f;
-        }
-        else
-        {
-            offsetRotA = rDyn.m_tf[rBait.m_a.m_id] * glm::vec4(rBait.m_a.m_offset, 0.0f);
-            posA = offsetRotA + glm::vec3(rDyn.m_tf[rBait.m_a.m_id][3]);
+        bool const worldA = rBait.m_a.m_id == -1;
 
-            glm::vec3 const velTan = glm::cross(rDyn.m_vel[rBait.m_a.m_id].m_ang, offsetRotA);
-            velA = rDyn.m_vel[rBait.m_a.m_id].m_lin + velTan;
-            massA = rDyn.m_mass[rBait.m_a.m_id];
-        }
+        // get stuff for A
+        glm::mat4x4 const&  tfA         = worldA ? mcidentity : rDyn.m_tf[rBait.m_a.m_id];
+        glm::vec3 const     offsetRotA  = tfA * glm::vec4(rBait.m_a.m_offset, 0.0f);
+        glm::vec3 const     posA        = offsetRotA + glm::vec3(tfA[3]);
+        LinAng const&       velA        = worldA ? linAngZero : rDyn.m_vel[rBait.m_a.m_id];
+        glm::vec3 const     pointVelA   = worldA ? glm::vec3{0.0f} : (velA.m_lin + glm::cross(velA.m_ang, offsetRotA));
+        float const         massA       = worldA ? 9999999.0f : rDyn.m_mass[rBait.m_a.m_id];
 
-        offsetRotB = (rDyn.m_tf[rBait.m_b.m_id] * glm::vec4(rBait.m_b.m_offset, 0.0f));
-        posB = offsetRotB + glm::vec3(rDyn.m_tf[rBait.m_b.m_id][3]);
+        // get stuff for B
+        glm::mat4x4 const&  tfB         = rDyn.m_tf[rBait.m_b.m_id];
+        glm::vec3 const     offsetRotB  = (tfB * glm::vec4(rBait.m_b.m_offset, 0.0f));
+        glm::vec3 const     posB        = offsetRotB + glm::vec3(tfB[3]);
+        LinAng const&       velB        = rDyn.m_vel[rBait.m_b.m_id];
+        glm::vec3 const     pointVelB   = velB.m_lin + glm::cross(velB.m_ang, offsetRotB);
+        float const         massB       = rDyn.m_mass[rBait.m_b.m_id];
 
-        glm::vec3 const velTan = glm::cross(rDyn.m_vel[rBait.m_b.m_id].m_ang, offsetRotB);
-        velB = rDyn.m_vel[rBait.m_b.m_id].m_lin + velTan;
+        glm::vec3 const     posRel      = posB - posA;
+        glm::vec3 const     velRel      = pointVelB - pointVelA;
 
-        massB = rDyn.m_mass[rBait.m_b.m_id];
-
-
-
-        glm::vec3 const     posRel  = posB - posA;
-        glm::vec3 const     velRel  = velB - velA;
-
-        // PD control lol what
-        glm::vec3 const     p   = posRel * 5.0f;
-        glm::vec3 const     d   = velRel * 0.1f;
-
-        float const lenBSq = glm::length2(rBait.m_b.m_offset);
-        float const lenASq = glm::length2(rBait.m_a.m_offset);
+        //float const lenBSq = glm::length2(rBait.m_b.m_offset);
+        //float const lenASq = glm::length2(rBait.m_a.m_offset);
+        //float const maxLen  = glm::max(lenASq, lenBSq);
 
         float const minMass = glm::min(massA, massB);
-        float const maxLen  = glm::max(lenASq, lenBSq);
 
-        glm::vec3 const totalLinImp = (p + d) * minMass;
-        glm::vec3 const totalAngImp = totalLinImp * 0.8f;
+        // calculate twist and stuff
+        glm::vec3 const     wsideA      = tfA * glm::vec4{rBait.m_a.m_side, 0.0f};
+        glm::vec3 const     wsideB      = tfB * glm::vec4{rBait.m_b.m_side, 0.0f};
 
-        if (rBait.m_a.m_id != -1)
+        glm::vec3 const     wdirA       = tfA * glm::vec4{rBait.m_a.m_dir, 0.0f};
+        glm::vec3 const     wdirB       = tfB * glm::vec4{rBait.m_b.m_dir, 0.0f};
+
+        glm::quat const     dragon      = glm::rotation(wdirB, wdirA);
+
+        //glm::vec3 verify = dragon * wdirB - wdirA;
+        //std::cout << "verify is zero: " << glm::length(verify) << "\n";
+        float const         roll        = glm::orientedAngle(wsideA, dragon * wsideB, wdirA);
+
+        float const         rollSpdA    = glm::dot(velA.m_ang, wdirA);
+        float const         rollSpdB    = glm::dot(velB.m_ang, wdirB);
+
+        std::cout << "rollspd: " << rollSpdB << "\n";
+
+        glm::vec3 const     totalLinImp = (posRel * opt.m_linP + velRel * opt.m_linD) * minMass;
+        glm::vec3 const     totalAngImp = totalLinImp;
+
+        if (! worldA)
         {
             rDyn.m_cstImp[rBait.m_a.m_id].m_lin += totalLinImp;
-            rDyn.m_cstImp[rBait.m_a.m_id].m_ang += glm::cross(offsetRotA, totalAngImp);
-
+            rDyn.m_cstImp[rBait.m_a.m_id].m_ang += glm::cross(offsetRotA, totalAngImp) + (roll * 6.0f + rollSpdA * -0.1f) * wdirA * massA;
         }
 
-        rDyn.m_cstImp[rBait.m_b.m_id].m_lin -= totalLinImp;
-        rDyn.m_cstImp[rBait.m_b.m_id].m_ang -= glm::cross(offsetRotB, totalAngImp);
+        rDyn.m_cstImp[rBait.m_b.m_id].m_lin += -totalLinImp;
+        rDyn.m_cstImp[rBait.m_b.m_id].m_ang += -glm::cross(offsetRotB, totalAngImp) + (roll * -6.0f + rollSpdB * -0.1f) * wdirB * massB;
     }
 }
 
