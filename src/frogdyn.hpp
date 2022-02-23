@@ -64,16 +64,18 @@ struct FrogDyn
         // rotation needed to rotate B into A's space
         glm::quat m_origin{};
 
-        float m_limSway;
-        float m_limMax;
+        float m_twistRange;
+        float m_twistSpring;
 
-        float m_springSway;
-        float m_springMax;
+        float m_coneRange;
+        float m_coneSpring;
 
-        bool m_doLimTwist{false};
-        bool m_doLimCone{false};
-        bool m_doSpringTwist{false};
-        bool m_doSpringCone{false};
+        bool m_doTwistLim{false};
+        bool m_doTwistSpring{false};
+        bool m_doConeLim{false};
+        bool m_doConeSpring{false};
+        bool m_doAlign{true};
+
     };
 
     struct CollisionCheck
@@ -123,7 +125,9 @@ constexpr bool aabb_intersect(AABB const& a, AABB const& b) noexcept
 struct BaitOptions
 {
     float m_linP, m_linD;
-    float m_angP, m_angD;
+    float m_twistP, m_twistD;
+    float m_coneP, m_coneD;
+    float m_alignP, m_alignD;
 };
 
 void apply_baits(FrogDyn &rDyn, BaitOptions opt, float delta);

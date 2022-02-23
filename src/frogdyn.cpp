@@ -9,8 +9,6 @@
 #include <glm/gtx/vector_angle.hpp>
 #include <glm/gtx/projection.hpp>
 
-#include <iostream>
-
 using namespace frogdyn;
 
 void frogdyn::apply_baits(FrogDyn &rDyn, BaitOptions opt, float delta)
@@ -50,35 +48,101 @@ void frogdyn::apply_baits(FrogDyn &rDyn, BaitOptions opt, float delta)
 
         float const minMass = glm::min(massA, massB);
 
-        // calculate twist and stuff
-        glm::vec3 const     wsideA      = tfA * glm::vec4{rBait.m_a.m_side, 0.0f};
-        glm::vec3 const     wsideB      = tfB * glm::vec4{rBait.m_b.m_side, 0.0f};
+        glm::vec3 angImpA{0.0f}, angImpB{0.0f};
 
         glm::vec3 const     wdirA       = tfA * glm::vec4{rBait.m_a.m_dir, 0.0f};
         glm::vec3 const     wdirB       = tfB * glm::vec4{rBait.m_b.m_dir, 0.0f};
 
-        glm::quat const     dragon      = glm::rotation(wdirB, wdirA);
+        glm::vec3 const     wsideA      = tfA * glm::vec4{rBait.m_a.m_side, 0.0f};
 
-        //glm::vec3 verify = dragon * wdirB - wdirA;
-        //std::cout << "verify is zero: " << glm::length(verify) << "\n";
-        float const         roll        = glm::orientedAngle(wsideA, dragon * wsideB, wdirA);
+        if (rBait.m_doTwistLim || rBait.m_doTwistSpring)
+        {
+            // need to do twist calculations
 
-        float const         rollSpdA    = glm::dot(velA.m_ang, wdirA);
-        float const         rollSpdB    = glm::dot(velB.m_ang, wdirB);
 
-        std::cout << "rollspd: " << rollSpdB << "\n";
+            glm::vec3 const wsideB      = tfB * glm::vec4{rBait.m_b.m_side, 0.0f};
 
-        glm::vec3 const     totalLinImp = (posRel * opt.m_linP + velRel * opt.m_linD) * minMass;
-        glm::vec3 const     totalAngImp = totalLinImp;
+            glm::quat const dragon      = glm::rotation(wdirB, wdirA);
+            float const     roll        = glm::orientedAngle(wsideA, dragon * wsideB, wdirA);
+
+            float const     lim         = rBait.m_twistRange;
+
+            if (rBait.m_doTwistLim && (-lim > roll || roll > lim))
+            {
+                float const rollSpdA    = glm::dot(velA.m_ang, wdirA);
+                float const rollSpdB    = glm::dot(velB.m_ang, wdirB);
+
+                float const phog = (roll > 0.0f) ? (roll - lim) : (roll + lim);
+                angImpA += (phog * opt.m_twistP - rollSpdA * opt.m_twistD) * wdirA * massA;
+                angImpB += (-phog * opt.m_twistP - rollSpdB * opt.m_twistD) * wdirB * massB;
+            }
+
+            if (rBait.m_doTwistSpring)
+            {
+                angImpA += (roll * rBait.m_twistSpring) * wdirA * delta;
+                angImpB += (-roll * rBait.m_twistSpring) * wdirB * delta;
+            }
+        }
+
+        if (rBait.m_doConeLim || rBait.m_doConeSpring)
+        {
+            // do cone calculations
+            float const     angDiff     = glm::angle(wdirA, wdirB);
+            glm::vec3 const dirCross    = glm::cross(wdirA, wdirB);
+            glm::vec3 const axis        = glm::normalize(glm::cross(wdirA, wdirB));
+
+            //std::cout << std::setprecision(5);
+            //std::cout << "verify: " << (glm::asin(glm::length(dirCross)) - angDiff) << "(" << (glm::asin(glm::length(dirCross))) << " - " << angDiff << ")\n";
+
+            float const     lim         = rBait.m_coneRange;
+
+            if (rBait.m_doConeLim && angDiff > lim)
+            {
+                float const swaySpdA    = glm::max(glm::dot(velA.m_ang, axis), 0.0f);
+                float const swaySpdB    = glm::max(glm::dot(velB.m_ang, axis), 0.0f);
+
+                float const phog = angDiff - lim;
+                angImpA += (phog * opt.m_coneP - swaySpdA * opt.m_coneD) * axis * massA;
+                angImpB += (-phog * opt.m_coneP - swaySpdB * opt.m_coneD) * axis * massB;
+            }
+
+            if (rBait.m_doConeSpring)
+            {
+                angImpA += (angDiff * rBait.m_coneSpring) * axis * delta;
+                angImpB += (-angDiff * rBait.m_coneSpring) * axis * delta;
+            }
+        }
+
+        if (rBait.m_doAlign)
+        {
+            glm::vec3 const dirBFlat = glm::normalize(wdirB - glm::proj(wdirB, wsideA));
+
+            glm::quat const gender = glm::rotation(dirBFlat, wdirB);
+            glm::vec3 const axis = glm::axis(gender);
+            float const angle = glm::angle(gender);
+
+            //float const wopr = glm::orientedAngle(wdirA, dirBFlat, wsideA);
+            //std::cout << "wo: " << glm::angle(gender) << "\n";
+
+            float const swaySpdA    = glm::dot(velA.m_ang, axis);
+            float const swaySpdB    = glm::dot(velB.m_ang, axis);
+
+            angImpA += (angle * opt.m_alignP - swaySpdA * opt.m_alignD) * axis * massA;
+            angImpB += (-angle * opt.m_alignP - swaySpdB * opt.m_alignD) * axis * massB;
+        }
+
+
+        glm::vec3 const     normalLinImp = (posRel * opt.m_linP + velRel * opt.m_linD) * minMass;
+        glm::vec3 const     normalAngImp = normalLinImp;
 
         if (! worldA)
         {
-            rDyn.m_cstImp[rBait.m_a.m_id].m_lin += totalLinImp;
-            rDyn.m_cstImp[rBait.m_a.m_id].m_ang += glm::cross(offsetRotA, totalAngImp) + (roll * 6.0f + rollSpdA * -0.1f) * wdirA * massA;
+            rDyn.m_cstImp[rBait.m_a.m_id].m_lin += normalLinImp;
+            rDyn.m_cstImp[rBait.m_a.m_id].m_ang += glm::cross(offsetRotA, normalAngImp) + angImpA;
         }
 
-        rDyn.m_cstImp[rBait.m_b.m_id].m_lin += -totalLinImp;
-        rDyn.m_cstImp[rBait.m_b.m_id].m_ang += -glm::cross(offsetRotB, totalAngImp) + (roll * -6.0f + rollSpdB * -0.1f) * wdirB * massB;
+        rDyn.m_cstImp[rBait.m_b.m_id].m_lin += -normalLinImp;
+        rDyn.m_cstImp[rBait.m_b.m_id].m_ang += -glm::cross(offsetRotB, normalAngImp) + angImpB;
     }
 }
 

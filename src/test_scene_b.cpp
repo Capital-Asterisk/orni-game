@@ -106,7 +106,7 @@ static void draw_scene(TestSceneB &rScene)
             {
                 float smldelta = delta * cstPercent / float(rScene.m_cstSteps);
 
-                apply_baits(rScene.m_frogs, {16.0f, 0.1f}, smldelta);
+                apply_baits(rScene.m_frogs, {16.0f, 0.1f, 6.0f, 0.1f, 32.0f, 0.6f, 32.0f, 0.6f}, smldelta);
 
                 apply_cst_forces(rScene.m_frogs, smldelta);
 
