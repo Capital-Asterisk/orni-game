@@ -57,6 +57,7 @@ struct FrogDyn
             glm::vec3 m_side;
         };
 
+        Bait() = default;
         Bait(Insect a, Insect b) : m_a{a}, m_b{b} { }
 
         Insect m_a, m_b;
@@ -74,7 +75,7 @@ struct FrogDyn
         bool m_doTwistSpring{false};
         bool m_doConeLim{false};
         bool m_doConeSpring{false};
-        bool m_doAlign{true};
+        bool m_doAlign{false};
 
     };
 
