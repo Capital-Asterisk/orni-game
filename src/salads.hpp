@@ -7,6 +7,8 @@
 
 #include <tiny_gltf.h>
 
+#include <unordered_map>
+
 namespace orni
 {
 
@@ -52,10 +54,11 @@ struct SaladModel
     meshdeform::Targets     m_tgt;
     meshdeform::MeshJoints  m_spookM;
     int                     m_spookId;
-    salad_id_t              m_sockOnId;
     Mesh                    m_rayMesh;
     Model                   m_rayModel;
 };
+
+using Salads_t = std::vector< std::unique_ptr<SaladModel> >;
 
 struct WetJoints : meshdeform::Joints
 {
@@ -96,10 +99,12 @@ struct CharB
 
     meshdeform::Joints      m_joints;
     WetJoints               m_wetJoints;
-
+    Apples                  m_apples;
 };
 
 using Characters_t = std::unordered_map<int, CharB>;
+
+// gltf parsing
 
 template<typename T>
 struct Burger
@@ -127,7 +132,6 @@ void metal_rod(
         int parentId,
         int level,
         FrogDyn& rFrogs,
-        Apples& rApples,
         CharB& rChar,
         glm::mat4x4 parentTfWorld);
 
@@ -135,8 +139,7 @@ void metal_bar(
         tinygltf::Model const&      gltf,
         int                         nodeId,
         CharB&                      rChar,
-        std::vector<SaladModel>&    rSalads,
-        Apples&                     rApples,
+        Salads_t&                   rSalads,
         std::vector<WetJoints> &    rSpooks,
         std::vector<Material>&      rMaterials,
         FrogDyn&                    rFrogs);
@@ -145,10 +148,65 @@ void metal_pipe(
         tinygltf::Model const&      gltf,
         int                         sceneId,
         Characters_t&               rChars,
-        std::vector<SaladModel>&    rSalads,
-        Apples&                     rApples,
-        std::vector<WetJoints> &    rSpooks,
+        Salads_t&                   rSalads,
         std::vector<Material>&      rMaterials,
         FrogDyn&                    rFrogs);
+
+// Mesh lazoring
+
+struct McRay
+{
+    glm::vec2   m_barypos;
+    float       m_dist;
+    int         m_index;
+};
+
+struct McRaySalad
+{
+    McRay           m_mcray;
+    salad_id_t      m_salad;
+};
+
+McRay shoop_da_whoop(glm::vec3 origin, glm::vec3 dir, int triCount, glm::vec3 const* pVrt, unsigned short const* pInd);
+
+McRay shoop_da_woop_salad(glm::vec3 origin, glm::vec3 dir, SaladModel const& salad);
+
+// tools
+
+using tool_id_t = int;
+
+struct Inputs
+{
+    tool_id_t               m_selected;
+
+    glm::vec2               m_mousePos;
+    glm::vec3               m_mouseOrig;
+    glm::vec3               m_mouseDir;
+//    bool                    m_mouseLPrev;
+//    bool                    m_mouseRPrev;
+//    bool                    m_mouseL;
+//    bool                    m_mouseR;
+
+    McRaySalad              m_lazor;
+};
+
+struct ToolGrab
+{
+    struct Grab
+    {
+        salad_id_t          m_salad;
+        int                 m_triangle;
+        glm::vec2           m_barypos;
+
+        glm::vec3           m_pullTo;
+    };
+
+    tool_id_t               m_id;
+
+    std::array<Grab, 8>     m_grabs;
+    int                     m_grabKeepCount;
+    bool                    m_active;
+};
+
 
 }

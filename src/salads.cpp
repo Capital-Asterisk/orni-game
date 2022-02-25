@@ -1,6 +1,7 @@
 #include "salads.hpp"
 
 #include <glm/gtx/transform.hpp>
+#include <glm/gtx/intersect.hpp>
 
 #include <raymath.h>
 
@@ -17,6 +18,31 @@ glm::mat4 node_transform(tinygltf::Node const& node)
     return glm::translate(translate) * glm::mat4(rot) * glm::scale(scale);
 }
 
+// write some templates and never use them
+template<typename T>
+static T crab(tinygltf::Value const& value, std::string const& name, T&& def)
+{
+    tinygltf::Type valType = tinygltf::Type::NULL_TYPE;
+    if constexpr (std::is_same_v<T, double>)
+    {
+        valType = tinygltf::Type::REAL_TYPE;
+    }
+    else if constexpr (std::is_same_v<T, std::string>)
+    {
+        valType = tinygltf::Type::STRING_TYPE;
+    }
+    // add more lol
+
+    if (tinygltf::Value const& patty = value.Get(name); patty.Type() == valType)
+    {
+        return patty.Get<T>();
+    }
+    else
+    {
+        return def;
+    }
+}
+
 static int zero_workaround_lol = 0;
 
 void metal_rod(
@@ -26,7 +52,6 @@ void metal_rod(
         int parentId,
         int level,
         FrogDyn& rFrogs,
-        Apples& rApples,
         CharB& rChar,
         glm::mat4x4 parentTfWorld)
 {
@@ -36,19 +61,21 @@ void metal_rod(
     glm::mat4x4 const nodeTfWorld = parentTfWorld * nodeTf;
 
     // check for mass
-    if (node.extras.IsObject()) // wtf?
+    if (node.extras.IsObject()) // sure
     {
         float comwok = 0.12f;
 
         if (tinygltf::Value const& massVal = node.extras.Get("mass"); massVal.IsNumber())
         {
             float mass = massVal.GetNumberAsDouble();
-            std::cout << "MASSSS! " << mass << "\n";
+            //std::cout << "MASSSS! " << mass << "\n";
 
             // Make a frog
             glm::mat4x4 frogTfWorld = nodeTfWorld;
-            frogTfWorld[3] += frogTfWorld[1] * comwok;
+            frogTfWorld[3] += nodeTfWorld[1] * comwok;
             frog_id_t const frogId = frogdyn::add_frog(rFrogs, frogTfWorld, mass);
+
+            std::cout << "Bone[" << node.name << "] is Frog[" << frogId << "] with mass: " << mass << "\n";
 
             // Add hopper
             rChar.m_wetJoints.m_hoppers.emplace_back(WetJoints::Hopper{frogId, nodeToJoint[nodeId], -comwok});
@@ -60,11 +87,70 @@ void metal_rod(
                 assert(parentJoint != -1);
                 auto foundIt = std::find_if(rChar.m_wetJoints.m_hoppers.begin(), rChar.m_wetJoints.m_hoppers.end(), [parentJoint] (WetJoints::Hopper const &wet) -> bool { return wet.m_joint == parentJoint; });
                 assert(foundIt != rChar.m_wetJoints.m_hoppers.end());
-                frog_id_t const parentFrogId = foundIt->m_joint;
-                glm::vec3 offset{0.0f, -comwok, 0.0f};
-                rFrogs.m_baits.emplace_back(
-                            FrogDyn::Bait{ {parentFrogId, glm::vec3{nodeTf[3]} + offset},
-                                           {frogId,   offset} });
+
+                frog_id_t const     parentFrogId = foundIt->m_joint;
+
+                glm::vec3           offset      {0.0f, -comwok, 0.0f};
+
+                // Create bait
+                FrogDyn::Bait       &rBait      = rFrogs.m_baits.emplace_back();
+
+                glm::vec4 const     side        {glm::vec3{nodeTfWorld[2]}, 0.0f};
+                glm::vec4 const     dir         {glm::vec3{nodeTfWorld[1]}, 0.0f}; // Y is forward for blender
+
+                glm::mat4x4 const   nodeTfInv   = glm::inverse(frogTfWorld);
+                glm::mat4x4 const   parentTfInv = glm::inverse(parentTfWorld);
+
+                rBait.m_a = {parentFrogId, glm::vec3{nodeTf[3]} + offset, parentTfInv * dir, parentTfInv * side};
+                rBait.m_b = {frogId, offset, nodeTfInv * dir, nodeTfInv * side};
+
+//                rBait.m_doTwistLim = true;
+//                rBait.m_twistRange = 0.0f;
+
+//                rBait.m_doConeSpring = true;
+//                rBait.m_coneSpring = 20.0f;
+
+//                rBait.m_doAlign = true;
+
+//                rFrogs.m_scale[frogId] = 0.6f;
+
+                //"tlim", "tspr", "clim", "cspr", "align"
+//                float tlim = crab(node.extras, "tlim", 0.01);
+//                float tspr = crab(node.extras, "tspr", 0.01);
+//                float clim = crab(node.extras, "clim", 0.01);
+//                float cspr = crab(node.extras, "clim", 0.01);
+
+                if (tinygltf::Value const& patty = node.extras.Get("tlim"); patty.IsNumber())
+                {
+                    rBait.m_doTwistLim = true;
+                    rBait.m_twistRange = glm::radians(patty.GetNumberAsDouble());
+                }
+                if (tinygltf::Value const& patty = node.extras.Get("tspr"); patty.IsNumber())
+                {
+                    rBait.m_doTwistSpring = true;
+                    rBait.m_twistSpring = patty.GetNumberAsDouble();
+                }
+                if (tinygltf::Value const& patty = node.extras.Get("clim"); patty.IsNumber())
+                {
+                    rBait.m_doConeLim = true;
+                    rBait.m_coneRange = glm::max(glm::radians(patty.GetNumberAsDouble()), 0.0125);
+                }
+                if (tinygltf::Value const& patty = node.extras.Get("cspr"); patty.IsNumber())
+                {
+                    rBait.m_doConeSpring = true;
+                    rBait.m_coneSpring = patty.GetNumberAsDouble();
+                }
+                if (tinygltf::Value const& patty = node.extras.Get("align"); patty.IsString())
+                {
+                    if (patty.Get<std::string>() == "x")
+                    {
+                        rBait.m_doAlign = true;
+                    }
+                    else
+                    {
+                        assert(0); // not yet implemented!
+                    }
+                }
             }
         }
     }
@@ -79,20 +165,20 @@ void metal_rod(
 
             if (child.name.rfind("Apl_EyeL") == 0)
             {
-                rChar.m_eyeL.m_apple = rApples.create(Apple{ node_transform(child), nodeToJoint[nodeId] });
+                rChar.m_eyeL.m_apple = rChar.m_apples.create(Apple{ node_transform(child), nodeToJoint[nodeId] });
             }
             else if (child.name.rfind("Apl_EyeR") == 0)
             {
-                rChar.m_eyeR.m_apple = rApples.create(Apple{ node_transform(child), nodeToJoint[nodeId] });
+                rChar.m_eyeR.m_apple = rChar.m_apples.create(Apple{ node_transform(child), nodeToJoint[nodeId] });
             }
         }
         else
         {
             // Bone
 
-            std::cout << child.name << "\n";
+            //std::cout << child.name << "\n";
 
-            metal_rod(nodeToJoint, gltf, childId, nodeId, level + 1, rFrogs, rApples, rChar, nodeTfWorld);
+            metal_rod(nodeToJoint, gltf, childId, nodeId, level + 1, rFrogs, rChar, nodeTfWorld);
         }
     }
 }
@@ -101,9 +187,7 @@ void metal_bar(
         tinygltf::Model const&      gltf,
         int                         nodeId,
         CharB&                      rChar,
-        std::vector<SaladModel>&    rSalads,
-        Apples&                     rApples,
-        std::vector<WetJoints> &    rSpooks,
+        Salads_t&                   rSalads,
         std::vector<Material>&      rMaterials,
         FrogDyn&                    rFrogs)
 {
@@ -124,7 +208,7 @@ void metal_bar(
 
         if (child.mesh != -1)
         {
-            SaladModel &rSalad = rSalads.emplace_back();
+            SaladModel &rSalad = *rSalads.emplace_back(std::make_unique<SaladModel>());
 
             if (child.skin != -1)
             {
@@ -233,16 +317,14 @@ void metal_bar(
     }
 
     // Iterate bones
-    metal_rod(nodeToJoint, gltf, nodeId, -1, -1, rFrogs, rApples, rChar, glm::mat4x4(1.0f));
+    metal_rod(nodeToJoint, gltf, nodeId, -1, -1, rFrogs, rChar, glm::mat4x4(1.0f));
 }
 
 void metal_pipe(
         tinygltf::Model const&      gltf,
         int                         sceneId,
         Characters_t&               rChars,
-        std::vector<SaladModel>&    rSalads,
-        Apples&                     rApples,
-        std::vector<WetJoints> &    rSpooks,
+        Salads_t&                   rSalads,
         std::vector<Material>&      rMaterials,
         FrogDyn&                    rFrogs)
 {
@@ -256,10 +338,41 @@ void metal_pipe(
             // yeah, this is a character to load
             // TODO: multiple character support?
             CharB &rChar = rChars.emplace(0, CharB{}).first->second;
-            metal_bar(gltf, nodeId, rChar, rSalads, rApples, rSpooks, rMaterials, rFrogs);
+            metal_bar(gltf, nodeId, rChar, rSalads, rMaterials, rFrogs);
         }
     }
 }
 
+McRay shoop_da_whoop(glm::vec3 origin, glm::vec3 dir, int triCount, glm::vec3 const* pVrt, unsigned short const* pInd)
+{
+    glm::vec2   outBarypos;
+    float       outDist     = std::numeric_limits<float>::max();
+    int         outIndex    = -1;
+
+    unsigned short const *pIndCurr = pInd;
+
+    for (int i = 0; i < triCount; i ++)
+    {
+        glm::vec2 barypos;
+        float dist;
+        if (glm::intersectRayTriangle<float, glm::defaultp>(origin, dir, pVrt[pIndCurr[0]], pVrt[pIndCurr[1]], pVrt[pIndCurr[2]], barypos, dist))
+        {
+            if (outDist > dist)
+            {
+                outDist = dist;
+                outIndex = i;
+            }
+        }
+
+        pIndCurr += 3;
+    }
+
+    return {outBarypos, outDist, outIndex};
+}
+
+McRay shoop_da_woop_salad(glm::vec3 origin, glm::vec3 dir, SaladModel const& salad)
+{
+    return shoop_da_whoop(origin, dir, salad.m_rayMesh.triangleCount, salad.m_Pos.data(), salad.m_rayMesh.indices);
+}
 
 }

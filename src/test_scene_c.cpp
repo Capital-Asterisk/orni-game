@@ -10,7 +10,6 @@
 #include <glm/gtx/matrix_interpolation.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-
 #include <iostream>
 #include <memory>
 #include <unordered_map>
@@ -22,12 +21,13 @@ namespace orni
 
 struct TestSceneC
 {
-    std::vector<SaladModel> m_salads;
-    Apples                  m_apples;
-    std::vector<WetJoints>  m_spooks;
+    Salads_t                m_salads;
     FrogDyn                 m_frogs;
 
     Characters_t            m_characters;
+
+    Inputs                  m_inputs;
+    ToolGrab                m_toolGrab;
 
     tinygltf::Model         m_gltf;
     std::vector<Image>      m_gltfRayImage;
@@ -41,7 +41,7 @@ struct TestSceneC
 
     RenderTexture2D         m_ui;
 
-    int                     m_cstSteps = 12;
+    int                     m_cstSteps = 15;
     float                   m_extPercent = 0.5f;
 
     float                   m_camDist{3.0f};
@@ -69,7 +69,7 @@ static glm::vec2 calc_eye_pos(glm::mat4x4 const& eyeTf, glm::vec3 tgt)
 {
     float eyeDepth = 0.03f;
     float eyeRadius = 0.09f;
-    glm::mat4 eyeMatrix = glm::perspective(glm::atan(eyeRadius / eyeDepth) * 2.0f, 1.0f, 0.001f, 100.0f)
+    glm::mat4 eyeMatrix = glm::perspective(glm::atan(eyeRadius / eyeDepth) * 2.0f, 1.0f, 0.001f, 1000.0f)
                         * glm::lookAt(glm::vec3(eyeTf[3]) - glm::vec3(eyeTf[2]) * eyeDepth,
                                       glm::vec3(eyeTf[3]) + glm::vec3(eyeTf[2]),
                                       glm::vec3(eyeTf[1]));
@@ -97,11 +97,72 @@ static void draw_iris(Texture2D texture, int i, glm::vec2 pos)
                    Vector2{0, 0}, 0.0f, WHITE);
 }
 
+static void update_inputs_rl(Camera const& cam, Inputs& rInputs)
+{
+    Vector2 mousePos = GetMousePosition();
+    Ray ray = GetMouseRay(mousePos, cam);
+
+    rInputs.m_mousePos      = {mousePos.x, mousePos.y};
+    rInputs.m_mouseOrig     = {ray.position.x, ray.position.y, ray.position.z};
+    rInputs.m_mouseDir      = {ray.direction.x, ray.direction.y, ray.direction.z};
+}
+
+static McRaySalad lazor_salads(glm::vec3 origin, glm::vec3 dir, Salads_t const& salads)
+{
+    McRaySalad mcRayOut;
+    mcRayOut.m_mcray.m_dist = std::numeric_limits<float>::max();
+    mcRayOut.m_salad = -1;
+    for (int i = 0; i < salads.size(); i ++)
+    {
+        if ( ! bool(salads[i]))
+        {
+            continue;
+        }
+
+        SaladModel const& salad = *salads[i];
+
+        McRay mcray = shoop_da_woop_salad(origin, dir, salad);
+        if (mcRayOut.m_mcray.m_dist > mcray.m_dist)
+        {
+            mcRayOut.m_mcray = mcray;
+            mcRayOut.m_salad = i;
+        }
+    }
+    return mcRayOut;
+}
+
+static void update_tool_grab(Salads_t const& salads, Inputs& rInputs, ToolGrab& rGrab)
+{
+    bool const selected = rInputs.m_selected == rGrab.m_id;
+
+    if (rGrab.m_active)
+    {
+        if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+        {
+            rGrab.m_active = false;
+        }
+        std::cout << "grab\n";
+    }
+    else if (selected && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+    {
+        // do grab
+        if (rInputs.m_lazor.m_salad == -1)
+        {
+            rInputs.m_lazor = lazor_salads(rInputs.m_mouseOrig, rInputs.m_mouseDir, salads);
+        }
+
+        if (rInputs.m_lazor.m_salad != -1)
+        {
+            rGrab.m_active = true;
+        }
+    }
+}
+
 static void draw_scene(TestSceneC &rScene)
 {
     auto &t = rScene.m_time;
 
-    float delta = GetFrameTime();
+    float delta = 1.0f / 60.0f;//GetFrameTime();
 
 
     rScene.m_camYaw += (float(IsKeyDown(KEY_RIGHT)) - float(IsKeyDown(KEY_LEFT))) * delta * 3.14159f;
@@ -117,10 +178,10 @@ static void draw_scene(TestSceneC &rScene)
 
     CharB &rChar = rScene.m_characters.begin()->second;
 
-    update_apples(rScene.m_apples, rChar.m_joints);
+    update_apples(rChar.m_apples, rChar.m_joints);
 
-    glm::vec2 eyePosL = calc_eye_pos(rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple], reinterpret_cast<glm::vec3&>(rScene.m_camera.position));
-    glm::vec2 eyePosR = calc_eye_pos(rScene.m_apples.m_dataOut[rChar.m_eyeR.m_apple], reinterpret_cast<glm::vec3&>(rScene.m_camera.position));
+    glm::vec2 eyePosL = calc_eye_pos(rChar.m_apples.m_dataOut[rChar.m_eyeL.m_apple], reinterpret_cast<glm::vec3&>(rScene.m_camera.position));
+    glm::vec2 eyePosR = calc_eye_pos(rChar.m_apples.m_dataOut[rChar.m_eyeR.m_apple], reinterpret_cast<glm::vec3&>(rScene.m_camera.position));
 
 
     float pushMag = (float(IsKeyDown(KEY_D)) - float(IsKeyDown(KEY_A))) * delta * 5.0f;
@@ -130,6 +191,11 @@ static void draw_scene(TestSceneC &rScene)
                 0.0f,
                 glm::cos(rScene.m_camYaw + 1.5708f)} * pushMag;
 
+    update_inputs_rl(rScene.m_camera, rScene.m_inputs);
+    rScene.m_inputs.m_selected = 0;
+    rScene.m_inputs.m_lazor.m_salad = -1;
+    update_tool_grab(rScene.m_salads, rScene.m_inputs, rScene.m_toolGrab);
+
     if (IsKeyDown(KEY_SPACE))
     {
         for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
@@ -138,6 +204,27 @@ static void draw_scene(TestSceneC &rScene)
         }
     }
 
+    if (IsKeyDown(KEY_R))
+    {
+        for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
+        {
+            rScene.m_frogs.m_vel[i].m_ang.x += 0.5f;
+        }
+    }
+
+    if (IsKeyDown(KEY_T))
+    {
+        for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
+        {
+            rScene.m_frogs.m_vel[i].m_lin.y += 0.1f;
+        }
+    }
+
+    if (IsKeyDown(KEY_F))
+    {
+        rScene.m_frogs.m_scale[5] += 0.05f;
+        rScene.m_frogs.m_mass[5] += 0.05f;
+    }
 
     if (IsKeyDown(KEY_LEFT_ALT))
     {
@@ -166,7 +253,7 @@ static void draw_scene(TestSceneC &rScene)
     {
         float smldelta = delta * cstPercent / float(rScene.m_cstSteps);
 
-        apply_baits(rScene.m_frogs, {16.0f, 0.1f, 16.0f, 0.1f}, smldelta);
+        apply_baits(rScene.m_frogs, {16.0f, 0.1f, 16.0f, 0.25f, 16.0f, 0.25f, 16.0f, 0.25f}, smldelta);
 
         apply_cst_forces(rScene.m_frogs, smldelta);
 
@@ -175,9 +262,11 @@ static void draw_scene(TestSceneC &rScene)
         calc_frog_collisions(rScene.m_frogs);
     }
 
+    // Update hoppers
     for (WetJoints::Hopper const& hopper : rChar.m_wetJoints.m_hoppers)
     {
-        rChar.m_joints.m_nodeTf.at(hopper.m_joint) = glm::translate(rScene.m_frogs.m_tf.at(hopper.m_frog), glm::vec3{0, hopper.m_yoffset, 0});
+        float const scale = rScene.m_frogs.m_scale[hopper.m_frog];
+        rChar.m_joints.m_nodeTf.at(hopper.m_joint) = glm::translate(rScene.m_frogs.m_tf.at(hopper.m_frog) * glm::scale(glm::vec3{scale, scale, scale}), glm::vec3{0, hopper.m_yoffset, 0});
     }
 
     meshdeform::calculate_joint_transforms(
@@ -193,19 +282,23 @@ static void draw_scene(TestSceneC &rScene)
 
         meshdeform::apply_vertex_transform(
                 rScene.m_characters[0].m_joints,
-                rScene.m_salads[i].m_spookM,
-                rScene.m_salads[i].m_tgt,
-                rScene.m_salads[i].m_pPosIn,
-                rScene.m_salads[i].m_pNrmIn,
+                rScene.m_salads[i]->m_spookM,
+                rScene.m_salads[i]->m_tgt,
+                rScene.m_salads[i]->m_pPosIn,
+                rScene.m_salads[i]->m_pNrmIn,
                 0,
-                rScene.m_salads[i].m_rayMesh.vertexCount,
-                rScene.m_salads[i].m_Pos.data(),
-                rScene.m_salads[i].m_Nrm.data());
+                rScene.m_salads[i]->m_rayMesh.vertexCount,
+                rScene.m_salads[i]->m_Pos.data(),
+                rScene.m_salads[i]->m_Nrm.data());
 
-        rlUpdateVertexBuffer(rScene.m_salads[i].m_rayMesh.vboId[0], rScene.m_salads[i].m_rayMesh.vertices, rScene.m_salads[i].m_rayMesh.vertexCount*3*sizeof(float), 0);    // Update vertex position
-        rlUpdateVertexBuffer(rScene.m_salads[i].m_rayMesh.vboId[2], rScene.m_salads[i].m_rayMesh.normals, rScene.m_salads[i].m_rayMesh.vertexCount*3*sizeof(float), 0);     // Update vertex normals
+        rlUpdateVertexBuffer(rScene.m_salads[i]->m_rayMesh.vboId[0], rScene.m_salads[i]->m_rayMesh.vertices, rScene.m_salads[i]->m_rayMesh.vertexCount*3*sizeof(float), 0);    // Update vertex position
+        rlUpdateVertexBuffer(rScene.m_salads[i]->m_rayMesh.vboId[2], rScene.m_salads[i]->m_rayMesh.normals, rScene.m_salads[i]->m_rayMesh.vertexCount*3*sizeof(float), 0);     // Update vertex normals
 
     }
+
+    Ray ray = GetMouseRay(GetMousePosition(), rScene.m_camera);
+    glm::vec3 const rayOrig = reinterpret_cast<glm::vec3&>(ray.position);
+    glm::vec3 const rayDir = reinterpret_cast<glm::vec3&>(ray.direction);
 
     BeginDrawing();
 
@@ -242,10 +335,11 @@ static void draw_scene(TestSceneC &rScene)
             BeginBlendMode(BLEND_ALPHA);
                 DrawGrid(10, 1.0f);
 
-                DrawModel(rScene.m_salads[0].m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
-                DrawModel(rScene.m_salads[2].m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
-                DrawModel(rScene.m_salads[3].m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
-                DrawModel(rScene.m_salads[1].m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+                rlDisableBackfaceCulling();
+                DrawModel(rScene.m_salads[0]->m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+                DrawModel(rScene.m_salads[2]->m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+                DrawModel(rScene.m_salads[3]->m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+                DrawModel(rScene.m_salads[1]->m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
             EndBlendMode();
         EndMode3D();
 
@@ -254,7 +348,43 @@ static void draw_scene(TestSceneC &rScene)
 
 
             BeginMode3D(rScene.m_camera);
-/*
+
+#if 1
+            {
+                RayCollision colinfo = GetRayCollisionModel(ray, rScene.m_salads[0]->m_rayModel);
+                DrawSphereWires(colinfo.point, 0.01f, 2, 4, MAGENTA);
+            }
+            {
+                RayCollision colinfo = GetRayCollisionModel(ray, rScene.m_salads[1]->m_rayModel);
+                DrawSphereWires(colinfo.point, 0.01f, 2, 4, MAGENTA);
+            }
+            {
+                RayCollision colinfo = GetRayCollisionModel(ray, rScene.m_salads[2]->m_rayModel);
+                DrawSphereWires(colinfo.point, 0.01f, 2, 4, MAGENTA);
+            }
+            {
+                RayCollision colinfo = GetRayCollisionModel(ray, rScene.m_salads[3]->m_rayModel);
+                DrawSphereWires(colinfo.point, 0.01f, 2, 4, MAGENTA);
+            }
+#endif
+
+            {
+                McRay mcray = shoop_da_woop_salad(rayOrig, rayDir, *rScene.m_salads[1]);
+                glm::vec3 hitpos = rayOrig + mcray.m_dist * rayDir;
+                DrawSphereWires(reinterpret_cast<Vector3&>(hitpos), 0.01f, 2, 4, YELLOW);
+            }
+            {
+                McRay mcray = shoop_da_woop_salad(rayOrig, rayDir, *rScene.m_salads[2]);
+                glm::vec3 hitpos = rayOrig +  mcray.m_dist * rayDir;
+                DrawSphereWires(reinterpret_cast<Vector3&>(hitpos), 0.01f, 2, 4, GREEN);
+            }
+            {
+                McRay mcray = shoop_da_woop_salad(rayOrig, rayDir, *rScene.m_salads[3]);
+                glm::vec3 hitpos = rayOrig + mcray.m_dist * rayDir;
+                DrawSphereWires(reinterpret_cast<Vector3&>(hitpos), 0.01f, 2, 4, SKYBLUE);
+            }
+
+#if 0
                 glm::vec3 avgPos{0.0f};
                 float totalMass = 0.0f;
                 // draw frogs
@@ -321,13 +451,17 @@ static void draw_scene(TestSceneC &rScene)
 
                 }
 
-                DrawSphere(Vector3{0.0f, 0.0f, 0.0f}, 0.05f, Color{255, 0, 0, 255});
-                if (glm::mod(t, 0.5f) < 0.5f/2.0f)
-                {
-                    DrawSphere(reinterpret_cast<Vector3&>(rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple][3]), 0.01f, GREEN);
-                }
 
-                */
+
+
+            DrawSphere(Vector3{0.0f, 0.0f, 0.0f}, 0.05f, Color{255, 0, 0, 255});
+            if (glm::mod(t, 0.1f) < 0.1f/2.0f)
+            {
+                glm::vec3 wok = rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple][3] + rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple][2];
+                DrawSphere(reinterpret_cast<Vector3&>(rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple][3]), 0.01f, GREEN);
+                DrawLine3D(reinterpret_cast<Vector3&>(rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple][3]), reinterpret_cast<Vector3&>(wok), BLUE);
+            }
+#endif
             EndMode3D();
 
             DrawRectangle(10, 10, 50, 25, Color{255, 255, 255, 255});
@@ -364,6 +498,8 @@ SceneFunc_t gen_test_scene_c()
     std::string warn;
 
     tinygltf::TinyGLTF loader;
+
+    rScene.m_toolGrab.m_id = 0;
 
     rScene.m_gltfRayImage.resize(10);
     loader.SetImageLoader([] (
@@ -410,7 +546,7 @@ SceneFunc_t gen_test_scene_c()
     }
 
     rScene.m_salads.reserve(10);
-    metal_pipe(rScene.m_gltf, 0, rScene.m_characters, rScene.m_salads, rScene.m_apples, rScene.m_spooks, rScene.m_gltfRayMaterials, rScene.m_frogs);
+    metal_pipe(rScene.m_gltf, 0, rScene.m_characters, rScene.m_salads, rScene.m_gltfRayMaterials, rScene.m_frogs);
 
     rScene.m_cube = GenMeshCube(0.04545f, 0.1f, 0.01136f);
     rScene.m_mat = LoadMaterialDefault();
