@@ -78,5 +78,5 @@ void main()
 
     // SRGB is not enabled so this really shouldn't be here
     // Gamma correction
-    //gl_FragColor = pow(finalColor, vec4(1.0/2.2));
+    gl_FragColor = finalColor;//pow(finalColor, vec4(1.0/2.2));
 }

@@ -17,7 +17,7 @@ std::function<void(orni::GameState&)> g_sceneFunc;
 
 void load_default_scene()
 {
-     g_sceneFunc = orni::gen_test_scene_c();
+     g_sceneFunc = orni::gen_test_scene_c(g_gameState);
 }
 
 void update_draw_frame()
@@ -36,7 +36,7 @@ void update_draw_frame()
     }
     else if (IsKeyDown(KEY_FOUR))
     {
-        g_sceneFunc = orni::gen_test_scene_c();
+        g_sceneFunc = orni::gen_test_scene_c(g_gameState);
     }
     g_sceneFunc(g_gameState);
 }

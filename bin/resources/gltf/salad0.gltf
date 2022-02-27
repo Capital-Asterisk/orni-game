@@ -141,7 +141,7 @@
                 "mass" : 0.8,
                 "tlim" : 20.0,
                 "clim" : 50.0,
-                "tspr" : 50.0,
+                "tspr" : 5.0,
                 "cspr" : 40.0
             },
             "name" : "head",
@@ -170,7 +170,7 @@
                 "mass" : 0.8,
                 "tlim" : 60.0,
                 "clim" : 40.0,
-                "tspr" : 50.0,
+                "tspr" : 5.0,
                 "cspr" : 40.0
             },
             "name" : "spine3",

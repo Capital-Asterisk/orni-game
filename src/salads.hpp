@@ -8,9 +8,24 @@
 #include <tiny_gltf.h>
 
 #include <unordered_map>
+#include <atomic>
+#include <thread>
+#include <condition_variable>
+#include <mutex>
 
 namespace orni
 {
+
+struct ThreadedLoop
+{
+    std::atomic<bool>       m_running;
+    std::thread             m_updater;
+    unsigned long           m_framesUpdated{0};
+    unsigned long           m_framesRendered{0};
+    std::mutex              m_syncFramesMtx;
+    std::condition_variable m_syncFramesCv;
+    std::mutex              m_updaterBusy;
+};
 
 // LOL
 using namespace frogdyn;
@@ -99,6 +114,7 @@ struct CharB
     {
         apple_id_t          m_apple;
         glm::ivec2          m_irisPos;
+        glm::vec2           m_texturePos;
     };
 
     Soul                    m_soul;

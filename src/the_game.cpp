@@ -11,6 +11,7 @@
 #else   // PLATFORM_RPI, PLATFORM_ANDROID, PLATFORM_WEB
     #define GLSL_VERSION            100
 #endif
+#define RLIGHTS_IMPLEMENTATION
 extern "C"
 {
 #include "rlights.h"
@@ -22,7 +23,6 @@ extern "C"
 #include <glm/gtx/string_cast.hpp>
 #include <glm/gtx/vector_angle.hpp>
 
-#include <chrono>
 #include <iostream>
 #include <memory>
 #include <unordered_map>
@@ -292,8 +292,8 @@ static void update_scene_loop(TestSceneC &rScene, GameState &rGame)
             //std::lock_guard<std::mutex>(rScene.m_updaterBusy);
             //std::cout << "doing update...\n";
             update_scene(rScene, rGame);
-            //std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            //std::cout << "finish update...\n";
+
+            //std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
             // Update finished
             {
@@ -316,13 +316,11 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
 
     // acquire variables and upload stuff needed to render, this 'completes' rendering
 
-    //std::cout << "sync render...\n";
     CharB const &rChar = rScene.m_characters.begin()->second;
     glm::vec2 const eyePosR = rChar.m_eyeR.m_texturePos;
     glm::vec2 const eyePosL = rChar.m_eyeL.m_texturePos;
-    Camera cam = rScene.m_camera;
 
-    SetShaderValue(rScene.m_shaderLit, rScene.m_shaderLit.locs[SHADER_LOC_VECTOR_VIEW], &cam.position.x, SHADER_UNIFORM_VEC3);
+    SetShaderValue(rScene.m_shaderLit, rScene.m_shaderLit.locs[SHADER_LOC_VECTOR_VIEW], &rScene.m_camera.position.x, SHADER_UNIFORM_VEC3);
     UpdateLightValues(rScene.m_shaderLit, rScene.m_lights[0]);
     UpdateLightValues(rScene.m_shaderLit, rScene.m_lights[1]);
     UpdateLightValues(rScene.m_shaderLit, rScene.m_lights[2]);
@@ -333,15 +331,11 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
         rlUpdateVertexBuffer(rScene.m_salads[i]->m_rayMesh.vboId[2], rScene.m_salads[i]->m_rayMesh.normals, rScene.m_salads[i]->m_rayMesh.vertexCount*3*sizeof(float), 0);     // Update vertex normals
     }
 
-    //std::cout << "sync render done...\n";
-
     {
         std::unique_lock<std::mutex> lock(rScene.m_syncFramesMtx);
         ++rScene.m_framesRendered;
     }
     rScene.m_syncFramesCv.notify_all(); // update of next frame can resume
-
-    //std::cout << "doing render...\n";
 
     BeginDrawing();
 
@@ -396,7 +390,7 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
             DrawTexturePro(rChar.m_eyeSheet, {ox, oy, g, -g}, rectL, {}, 0.0f, WHITE);
         EndTextureMode();
 
-        BeginMode3D(cam);
+        BeginMode3D(rScene.m_camera);
             BeginBlendMode(BLEND_ALPHA);
                 DrawGrid(10, 1.0f);
 
@@ -416,7 +410,7 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
             ClearBackground(Color{ 0, 0, 0, 0 });
 
 
-            BeginMode3D(cam);
+            BeginMode3D(rScene.m_camera);
 
 #if 0
                 // draw frogs
@@ -504,11 +498,9 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
         auto &rTex = rScene.m_ui.texture;
         DrawTextureRec(rTex, Rectangle{0.0f, 0.0f, float(rTex.width), -float(rTex.height) * 1.0f}, Vector2{0.0f, 0.0f}, Color{255, 255, 255, 255});
     EndDrawing();
-
-    //std::cout << "end render...\n";
 }
 
-SceneFunc_t gen_test_scene_c(GameState &rGame)
+SceneFunc_t gen_the_game_scene(GameState &rGame)
 {
     std::shared_ptr<TestSceneC> pScene = std::make_shared<TestSceneC>();
     TestSceneC &rScene = *pScene;

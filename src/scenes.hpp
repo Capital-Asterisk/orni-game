@@ -15,6 +15,9 @@ SceneFunc_t gen_test_scene_b();
 
 SceneFunc_t gen_test_scene_b_b();
 
-SceneFunc_t gen_test_scene_c();
+SceneFunc_t gen_test_scene_c(GameState &rGame);
+
+SceneFunc_t gen_the_game_scene(GameState &rGame);
+
 
 }
