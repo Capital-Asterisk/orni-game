@@ -101,7 +101,8 @@ void frogdyn::apply_baits(FrogDyn &rDyn, BaitOptions opt, float delta)
             //std::cout << std::setprecision(5);
             //std::cout << "verify: " << (glm::asin(glm::length(dirCross)) - angDiff) << "(" << (glm::asin(glm::length(dirCross))) << " - " << angDiff << ")\n";
 
-            if (angDiff > 0.004)
+
+            if (angDiff > 0.004 && !glm::isnan(axis.x+axis.y+axis.z))
             {
 
             float const     lim         = rBait.m_coneRange;
@@ -114,6 +115,7 @@ void frogdyn::apply_baits(FrogDyn &rDyn, BaitOptions opt, float delta)
                 angImpA += (phog * opt.m_coneP - swaySpd * opt.m_coneD) * axis * minMass;
                 angImpB += (-phog * opt.m_coneP + swaySpd * opt.m_coneD) * axis * minMass;
             }
+
 
             if (rBait.m_doConeSpring)
             {

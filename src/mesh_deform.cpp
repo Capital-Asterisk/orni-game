@@ -52,7 +52,7 @@ void meshdeform::apply_vertex_transform(
     for (std::size_t i = first; i < last; i ++)
     {
         glm::vec3 pos(*pPosInCurr);
-        glm::vec3 nrm(*pNrmOutCurr);
+        glm::vec3 nrm(*pNrmInCurr);
 
         pPosInCurr ++;
         pNrmInCurr ++;

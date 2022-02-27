@@ -5,6 +5,18 @@
 #include <raymath.h>
 #include <rlgl.h>
 
+// todo
+#define RLIGHTS_IMPLEMENTATION
+extern "C"
+{
+#include "rlights.h"
+}
+#if defined(PLATFORM_DESKTOP)
+    #define GLSL_VERSION            330
+#else   // PLATFORM_RPI, PLATFORM_ANDROID, PLATFORM_WEB
+    #define GLSL_VERSION            100
+#endif
+
 #include <glm/gtx/transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/matrix_interpolation.hpp>
@@ -15,10 +27,12 @@
 #include <memory>
 #include <unordered_map>
 
+#if defined(PLATFORM_WEB)
+    #include <emscripten/emscripten.h>
+#endif
+
 namespace orni
 {
-
-
 
 struct TestSceneC
 {
@@ -35,8 +49,9 @@ struct TestSceneC
         }
         for (Material &rMat : m_gltfRayMaterials)
         {
-            UnloadMaterial(rMat);
+            RL_FREE(rMat.maps);
         }
+        UnloadShader(m_shaderLit);
         UnloadMesh(m_cube);
         UnloadRenderTexture(m_ui);
         UnloadMaterial(m_mat);
@@ -68,6 +83,8 @@ struct TestSceneC
 
     Mesh                    m_cube;
     Material                m_mat;
+    Shader                  m_shaderLit;
+    std::array<Light, 4>    m_lights;
 
     RenderTexture2D         m_ui;
 
@@ -83,286 +100,8 @@ struct TestSceneC
 
 };
 
-static void update_apples(Apples &rApples, meshdeform::Joints const& rJoints)
-{
-    for (apple_id_t id = 0; id < rApples.m_ids.capacity(); id ++)
-    {
-        if ( ! rApples.m_ids.exists(id))
-        {
-            continue;
-        }
 
-        auto const &apl = rApples.m_data[id];
-
-        rApples.m_dataOut[id] = rJoints.m_nodeTf[apl.m_jointParent] * apl.m_tf;
-    }
-}
-
-// lol
-float const eyeDepth = 0.03f;
-float const eyeRadius = 0.09f;
-float const eyeFov = glm::atan(eyeRadius / eyeDepth) * 2.0f;
-
-static glm::vec2 calc_eye_pos(glm::mat4x4 const& eyeTf, glm::vec3 tgt)
-{
-
-    glm::mat4 eyeMatrix = glm::perspective(eyeFov, 1.0f, 0.001f, 1000.0f)
-                        * glm::lookAt(glm::vec3(eyeTf[3]) - glm::vec3(eyeTf[2]) * eyeDepth,
-                                      glm::vec3(eyeTf[3]) + glm::vec3(eyeTf[2]),
-                                      glm::vec3(eyeTf[1]));
-
-    glm::vec3 foo = eyeMatrix * glm::vec4(tgt, 1.0f);
-    foo.x /= foo.z;
-    foo.y /= foo.z;
-
-    return glm::vec2(foo);
-}
-
-static bool eye_visible(glm::mat4x4 const& eyeTf, glm::vec3 tgt)
-{
-    float const ang = glm::angle(glm::vec3(eyeTf[2]), tgt - glm::vec3(eyeTf[3]));
-    return ang < eyeFov;
-}
-
-static void draw_iris(Texture2D texture, int i, glm::vec2 pos)
-{
-    constexpr float const w = 128.0f, h = 128.0f, r = 64.0f, c = 32.0f;
-
-    float const len = glm::min(glm::length(pos) * r, c);
-    pos = glm::normalize(pos) * glm::vec2{-1.0f, 1.0f} * len;
-
-    float const x = 128 * i, y = 128;
-    float const xlapP = glm::clamp(pos.x, 0.0f, w);
-    float const xlapN = glm::clamp(pos.x, -w, 0.0f);
-    DrawTexturePro(texture,
-                   Rectangle{-xlapN,            0,          w - xlapP + xlapN,  -h},
-                   Rectangle{x + pos.x - xlapN, y + pos.y,  w - xlapP + xlapN,  h},
-                   Vector2{0, 0}, 0.0f, WHITE);
-}
-
-static void update_inputs_rl(Camera const& cam, Inputs& rInputs)
-{
-    Vector2 mousePos = GetMousePosition();
-    Ray ray = GetMouseRay(mousePos, cam);
-
-    rInputs.m_mousePos      = {mousePos.x, mousePos.y};
-    rInputs.m_mouseOrig     = {ray.position.x, ray.position.y, ray.position.z};
-    rInputs.m_mouseDir      = {ray.direction.x, ray.direction.y, ray.direction.z};
-}
-
-static McRaySalad lazor_salads(glm::vec3 origin, glm::vec3 dir, Salads_t const& salads)
-{
-    McRaySalad mcRayOut;
-    mcRayOut.m_mcray.m_dist = std::numeric_limits<float>::max();
-    mcRayOut.m_salad = -1;
-    for (int i = 0; i < salads.size(); i ++)
-    {
-        if ( ! bool(salads[i]))
-        {
-            continue;
-        }
-
-        SaladModel const& salad = *salads[i];
-
-        McRay mcray = shoop_da_woop_salad(origin, dir, salad);
-        if (mcRayOut.m_mcray.m_dist > mcray.m_dist)
-        {
-            mcRayOut.m_mcray = mcray;
-            mcRayOut.m_salad = i;
-        }
-    }
-    return mcRayOut;
-}
-
-static int paw_default_base_attribute(meshdeform::MeshJoints const& joints, unsigned short const *pInd)
-{
-    // Figure out which joint is associated with a triangle
-    // 3 vertices each with 4 joints each with a weight
-    // make a mini histogram!
-    int                             count       = 0;
-    int                             top         = 0;
-    static constexpr int            fox         = 12;
-    std::array<unsigned char, fox>  cntJoints;
-    std::array<float, fox>          cntWeights;
-
-
-    // loop through 3 vertices
-    for (int i = 0; i < 3; ++i)
-    {
-        int const           index           = (*pInd) * 4;
-        unsigned char const *pJointInd      = &joints.m_pJointsIn[index];
-        float const         *pWeight        = &joints.m_pWeightsIn[index];
-        //std::cout << "Vertex " << (*pInd) << "\n";
-        for (int j = 0; j < 4; ++j)
-        {
-            if ((*pWeight) < 0.001)
-            {
-                continue;
-            }
-            //std::cout << "* Joint: " << int(*pJointInd) << " @" << (*pWeight) << "\n";
-
-            auto const  pBegin  = cntJoints.begin();
-            auto const  pEnd    = cntJoints.begin() + count;
-            int         found   = std::distance(pBegin, std::find(pBegin, pEnd, *pJointInd));
-
-            float &rTotalWeight = cntWeights[found];
-
-            if (found == count)
-            {
-                // new entry
-                cntJoints[found]  = *pJointInd;
-                rTotalWeight = *pWeight;
-                ++count;
-            }
-            else
-            {
-                // already exists
-                rTotalWeight += *pWeight;
-            }
-
-            // track highest on the fly
-            if (cntWeights[top] < rTotalWeight)
-            {
-                top = found;
-            }
-
-            ++pJointInd;
-            ++pWeight;
-        }
-        ++pInd;
-    }
-
-    return cntJoints[top];
-}
-
-static float rand_dist(float dist)
-{
-    float woot = GetRandomValue(-65536, 65536) / 65536.0f;
-    return woot * woot * glm::sign(woot) * dist;
-}
-
-static void update_expressions(Soul &rSoul, float delta)
-{
-    rSoul.m_blinkCdn -= delta;
-
-    if (rSoul.m_blinkCdn <= 0.0f)
-    {
-        rSoul.m_blinkCdn = rand_dist(rSoul.m_blinkPeriodMargin) + rSoul.m_blinkPeriodAvg;
-    }
-
-    rSoul.m_breathCycle += delta * rSoul.m_breathSpeed;
-    rSoul.m_breathCycle -= float(rSoul.m_breathCycle > 1.0f);
-}
-
-bool g_limits{true};
-
-static void update_tool_grab(
-        Salads_t const& salads,
-        WetJoints const& wet,
-        FrogDyn& rFrogs,
-        Inputs& rInputs,
-        ToolGrab& rToolGrab)
-{
-    bool const selected = rInputs.m_selected == rToolGrab.m_id;
-
-    if (rToolGrab.m_active)
-    {
-        if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT))
-        {
-            // release
-            rToolGrab.m_active = false;            
-            int id = rToolGrab.m_grabs.back().baitId;
-            rToolGrab.m_grabs.pop_back();
-            auto found = std::find_if(rFrogs.m_baits.begin(), rFrogs.m_baits.end(), [id] (FrogDyn::Bait const& bait) { return bait.m_id == id; });
-
-            rFrogs.m_baits.erase(found);
-        }
-        else if (IsKeyPressed(KEY_SPACE))
-        {
-            rToolGrab.m_active = false;
-        }
-    }
-    else if (selected && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-    {
-        // do grab
-        if (rInputs.m_lazor.m_salad == -1)
-        {
-            rInputs.m_lazor = lazor_salads(rInputs.m_mouseOrig, rInputs.m_mouseDir, salads);
-        }
-
-        if (rInputs.m_lazor.m_salad != -1)
-        {
-            SaladModel const&               salad       = *salads.at(rInputs.m_lazor.m_salad);
-
-            //std::cout << "Connected joint: " << int(cntJoints[top]) << "\n";
-
-            // get joint, then linear search for connected frog
-            int const joint = paw_default_base_attribute(salad.m_spookM, &salad.m_rayMesh.indices[rInputs.m_lazor.m_mcray.m_index * 3]);
-
-            auto foundIt = std::find_if(
-                        wet.m_hoppers.begin(), wet.m_hoppers.end(),
-                        [joint] (WetJoints::Hopper const& hopper)
-            {
-                return hopper.m_joint == joint;
-            });
-
-            if (foundIt != wet.m_hoppers.end())
-            {
-                ToolGrab::Grab &rGrab = rToolGrab.m_grabs.emplace_back();
-
-                frog_id_t const frog = foundIt->m_frog;
-
-                // add bait
-                glm::vec3 const down{0.0f, -1.0f, 0.0f};
-                glm::vec3 const fwd{0.0f, 0.0f, 1.0f};
-                glm::vec3 const lazorHit = rInputs.m_mouseOrig + rInputs.m_mouseDir * rInputs.m_lazor.m_mcray.m_dist;
-                glm::vec3 const frogInvHit = glm::inverse(rFrogs.m_tf[frog]) * glm::vec4(lazorHit, 1.0f);
-
-                rToolGrab.m_active = true;
-                rGrab.baitId = 420 + rToolGrab.m_grabs.size();
-
-                FrogDyn::Bait &rBait = rFrogs.m_baits.emplace_back(
-                            FrogDyn::Bait{ {-1,  lazorHit, down, fwd},
-                                           {frog,   frogInvHit, down, fwd} });
-                rBait.m_id = rGrab.baitId;
-                if (g_limits)
-                {
-                    rBait.m_forceLim = 15.2f * 10.0f * 3.0f;
-                }
-                //rBait.m_strengthMul = 0.2f;
-
-                //rFrogs.m_extImp[frog].m_lin += rInputs.m_mouseDir * 10.0f;
-            }
-        }
-    }
-
-     if (rToolGrab.m_active)
-     {
-         ToolGrab::Grab &rGrab = rToolGrab.m_grabs.back();
-
-         for (FrogDyn::Bait &rBait : rFrogs.m_baits)
-         {
-             if (rBait.m_id != rGrab.baitId)
-             {
-                 continue;
-             }
-
-             float const dist = glm::length(rBait.m_a.m_offset - rInputs.m_mouseOrig);
-             rBait.m_a.m_offset = rInputs.m_mouseOrig + rInputs.m_mouseDir * dist;
-
-             rFrogs.m_vel[rBait.m_b.m_id].m_lin *= 0.0f;
-             //rFrogs.m_vel[rBait.m_b.m_id].m_ang *= 0.0f;
-
-             break;
-         }
-     }
-}
-
-static float breath_cycle(float t) noexcept
-{
-    float const tau = glm::pi<float>() * 2.0f;
-    return glm::sin(tau*(t - 0.25f)) + 0.2f * sin(tau*2*t) + 1.0;
-}
+int frame = 0;
 
 static void draw_scene(TestSceneC &rScene, GameState &rGame)
 {
@@ -476,19 +215,14 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
     // apply drag
     for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
     {
-        float const anglength = glm::length(rScene.m_frogs.m_vel[i].m_ang);
-        if (anglength > 0.001)
-        {
-            rScene.m_frogs.m_vel[i].m_ang = rScene.m_frogs.m_vel[i].m_ang / anglength * glm::max(0.0f, anglength - angdrag);
-        }
-
-        float const linlength = glm::length(rScene.m_frogs.m_vel[i].m_lin);
-        if (linlength > 0.001)
-        {
-            rScene.m_frogs.m_vel[i].m_lin = rScene.m_frogs.m_vel[i].m_lin / linlength * glm::max(0.0f, linlength - lindrag);
-        }
-
+        rScene.m_frogs.m_vel[i].m_ang = frogdyn::oppose(rScene.m_frogs.m_vel[i].m_ang, angdrag);
+        rScene.m_frogs.m_vel[i].m_lin = frogdyn::oppose(rScene.m_frogs.m_vel[i].m_lin, lindrag);
         //rScene.m_frogs.m_vel[i].m_lin *= 0.998f;
+    }
+
+    // add more drag to head
+    {
+
     }
 
     // Update hoppers
@@ -545,8 +279,13 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
 
     avgPos /= totalMass;
 
-    //reinterpret_cast<glm::vec3&>(rScene.m_camera.target) =  avgPos;
-    //reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
+    reinterpret_cast<glm::vec3&>(rScene.m_camera.target) =  avgPos;
+    reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
+
+    SetShaderValue(rScene.m_shaderLit, rScene.m_shaderLit.locs[SHADER_LOC_VECTOR_VIEW], &rScene.m_camera.position.x, SHADER_UNIFORM_VEC3);
+    UpdateLightValues(rScene.m_shaderLit, rScene.m_lights[0]);
+    UpdateLightValues(rScene.m_shaderLit, rScene.m_lights[1]);
+    UpdateLightValues(rScene.m_shaderLit, rScene.m_lights[2]);
 
     BeginDrawing();
 
@@ -689,7 +428,7 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
 #endif
             EndMode3D();
 
-            DrawTextEx(*rGame.m_pFont, "What is the best way to immobilize caT?", Vector2{10.0, 100.0}, 20, 0, WHITE);
+            DrawTextEx(*rGame.m_pFont, "Sample Text", Vector2{10.0, 100.0}, 20, 0, WHITE);
 
             DrawRectangle(10, 10, 50, 25, Color{255, 255, 255, 255});
 
@@ -776,8 +515,63 @@ SceneFunc_t gen_test_scene_c()
         }
     }
 
+    rScene.m_shaderLit = LoadShader(TextFormat("resources/shaders/glsl%i/base_lighting.vs", GLSL_VERSION),
+                                   TextFormat("resources/shaders/glsl%i/lighting.fs", GLSL_VERSION));
+    rScene.m_shaderLit.locs[SHADER_LOC_VECTOR_VIEW] = GetShaderLocation(rScene.m_shaderLit, "viewPos");
+    int ambientLoc = GetShaderLocation(rScene.m_shaderLit, "ambient");
+    glm::vec4 wo{ 7.5f, 7.0f, 9.0f, 10.0f };
+    SetShaderValue(rScene.m_shaderLit, ambientLoc, &wo[0], SHADER_UNIFORM_VEC4);
+
+    {
+    Light& light = rScene.m_lights[0];
+    light.type = LIGHT_DIRECTIONAL;
+    light.color = {130, 110, 65, 255};
+    light.position = {1.0f, 1.0f, 1.0f};
+    light.target = {0.0f, 0.0f, 0.0f};
+    light.enabled = true;
+    light.enabledLoc    = GetShaderLocation(rScene.m_shaderLit, "lights[0].enabled");
+    light.typeLoc       = GetShaderLocation(rScene.m_shaderLit, "lights[0].type");
+    light.posLoc        = GetShaderLocation(rScene.m_shaderLit, "lights[0].position");
+    light.targetLoc     = GetShaderLocation(rScene.m_shaderLit, "lights[0].target");
+    light.colorLoc      = GetShaderLocation(rScene.m_shaderLit, "lights[0].color");
+    }
+
+    {
+    Light& light = rScene.m_lights[1];
+    light.type = LIGHT_DIRECTIONAL;
+    light.color = {70, 50, 20, 255};
+    light.position = {0.0f, 0.0f, -1.0f};
+    light.target = {0.0f, 0.0f, 0.0f};
+    light.enabled = true;
+    light.enabledLoc    = GetShaderLocation(rScene.m_shaderLit, "lights[1].enabled");
+    light.typeLoc       = GetShaderLocation(rScene.m_shaderLit, "lights[1].type");
+    light.posLoc        = GetShaderLocation(rScene.m_shaderLit, "lights[1].position");
+    light.targetLoc     = GetShaderLocation(rScene.m_shaderLit, "lights[1].target");
+    light.colorLoc      = GetShaderLocation(rScene.m_shaderLit, "lights[1].color");
+    }
+
+    {
+    Light& light = rScene.m_lights[2];
+    light.type = LIGHT_DIRECTIONAL;
+    light.color = {10, 16, 30, 255};
+    light.position = {0.0f, -1.0f, 0.0f};
+    light.target = {0.0f, 0.0f, 0.0f};
+    light.enabled = true;
+    light.enabledLoc    = GetShaderLocation(rScene.m_shaderLit, "lights[2].enabled");
+    light.typeLoc       = GetShaderLocation(rScene.m_shaderLit, "lights[2].type");
+    light.posLoc        = GetShaderLocation(rScene.m_shaderLit, "lights[2].position");
+    light.targetLoc     = GetShaderLocation(rScene.m_shaderLit, "lights[2].target");
+    light.colorLoc      = GetShaderLocation(rScene.m_shaderLit, "lights[2].color");
+    }
+
     rScene.m_salads.reserve(10);
     metal_pipe(rScene.m_gltf, 0, rScene.m_characters, rScene.m_salads, rScene.m_gltfRayMaterials, rScene.m_frogs);
+
+
+    for (Material &rMat : rScene.m_gltfRayMaterials)
+    {
+        rMat.shader = rScene.m_shaderLit;
+    }
 
     rScene.m_cube = GenMeshCube(0.04545f, 0.1f, 0.01136f);
     rScene.m_mat = LoadMaterialDefault();

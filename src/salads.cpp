@@ -2,6 +2,7 @@
 
 #include <glm/gtx/transform.hpp>
 #include <glm/gtx/intersect.hpp>
+#include <glm/gtx/vector_angle.hpp>
 
 #include <raymath.h>
 
@@ -9,6 +10,170 @@
 
 namespace orni
 {
+
+void update_tool_grab(
+        Salads_t const& salads,
+        WetJoints const& wet,
+        FrogDyn& rFrogs,
+        Inputs& rInputs,
+        ToolGrab& rToolGrab)
+{
+    bool const selected = rInputs.m_selected == rToolGrab.m_id;
+
+    if (rToolGrab.m_active)
+    {
+        if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+        {
+            // release
+            rToolGrab.m_active = false;
+            int id = rToolGrab.m_grabs.back().baitId;
+            rToolGrab.m_grabs.pop_back();
+            auto found = std::find_if(rFrogs.m_baits.begin(), rFrogs.m_baits.end(), [id] (FrogDyn::Bait const& bait) { return bait.m_id == id; });
+
+            rFrogs.m_baits.erase(found);
+        }
+        else if (IsKeyPressed(KEY_SPACE))
+        {
+            rToolGrab.m_active = false;
+        }
+    }
+    else if (selected && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+    {
+        // do grab
+        if (rInputs.m_lazor.m_salad == -1)
+        {
+            rInputs.m_lazor = lazor_salads(rInputs.m_mouseOrig, rInputs.m_mouseDir, salads);
+        }
+
+        if (rInputs.m_lazor.m_salad != -1)
+        {
+            SaladModel const&               salad       = *salads.at(rInputs.m_lazor.m_salad);
+
+            //std::cout << "Connected joint: " << int(cntJoints[top]) << "\n";
+
+            // get joint, then linear search for connected frog
+            int const joint = paw_default_base_attribute(salad.m_spookM, &salad.m_rayMesh.indices[rInputs.m_lazor.m_mcray.m_index * 3]);
+
+            auto foundIt = std::find_if(
+                        wet.m_hoppers.begin(), wet.m_hoppers.end(),
+                        [joint] (WetJoints::Hopper const& hopper)
+            {
+                return hopper.m_joint == joint;
+            });
+
+            if (foundIt != wet.m_hoppers.end())
+            {
+                ToolGrab::Grab &rGrab = rToolGrab.m_grabs.emplace_back();
+
+                frog_id_t const frog = foundIt->m_frog;
+
+                // add bait
+                glm::vec3 const down{0.0f, -1.0f, 0.0f};
+                glm::vec3 const fwd{0.0f, 0.0f, 1.0f};
+                glm::vec3 const lazorHit = rInputs.m_mouseOrig + rInputs.m_mouseDir * rInputs.m_lazor.m_mcray.m_dist;
+                glm::vec3 const frogInvHit = glm::inverse(rFrogs.m_tf[frog]) * glm::vec4(lazorHit, 1.0f);
+
+                rToolGrab.m_active = true;
+                rGrab.baitId = 420 + rToolGrab.m_grabs.size();
+
+                FrogDyn::Bait &rBait = rFrogs.m_baits.emplace_back(
+                            FrogDyn::Bait{ {-1,  lazorHit, down, fwd},
+                                           {frog,   frogInvHit, down, fwd} });
+                rBait.m_id = rGrab.baitId;
+                if (g_limits)
+                {
+                    rBait.m_forceLim = 15.2f * 10.0f * 3.0f;
+                }
+                //rBait.m_strengthMul = 0.2f;
+
+                //rFrogs.m_extImp[frog].m_lin += rInputs.m_mouseDir * 10.0f;
+            }
+        }
+    }
+
+     if (rToolGrab.m_active)
+     {
+         ToolGrab::Grab &rGrab = rToolGrab.m_grabs.back();
+
+         for (FrogDyn::Bait &rBait : rFrogs.m_baits)
+         {
+             if (rBait.m_id != rGrab.baitId)
+             {
+                 continue;
+             }
+
+             float const dist = glm::length(rBait.m_a.m_offset - rInputs.m_mouseOrig);
+             rBait.m_a.m_offset = rInputs.m_mouseOrig + rInputs.m_mouseDir * dist;
+
+             rFrogs.m_vel[rBait.m_b.m_id].m_lin *= 0.0f;
+             //rFrogs.m_vel[rBait.m_b.m_id].m_ang *= 0.0f;
+
+             break;
+         }
+     }
+}
+
+
+int paw_default_base_attribute(meshdeform::MeshJoints const& joints, unsigned short const *pInd)
+{
+    // Figure out which joint is associated with a triangle
+    // 3 vertices each with 4 joints each with a weight
+    // make a mini histogram!
+    int                             count       = 0;
+    int                             top         = 0;
+    static constexpr int            fox         = 12;
+    std::array<unsigned char, fox>  cntJoints;
+    std::array<float, fox>          cntWeights;
+
+
+    // loop through 3 vertices
+    for (int i = 0; i < 3; ++i)
+    {
+        int const           index           = (*pInd) * 4;
+        unsigned char const *pJointInd      = &joints.m_pJointsIn[index];
+        float const         *pWeight        = &joints.m_pWeightsIn[index];
+        //std::cout << "Vertex " << (*pInd) << "\n";
+        for (int j = 0; j < 4; ++j)
+        {
+            if ((*pWeight) < 0.001)
+            {
+                continue;
+            }
+            //std::cout << "* Joint: " << int(*pJointInd) << " @" << (*pWeight) << "\n";
+
+            auto const  pBegin  = cntJoints.begin();
+            auto const  pEnd    = cntJoints.begin() + count;
+            int         found   = std::distance(pBegin, std::find(pBegin, pEnd, *pJointInd));
+
+            float &rTotalWeight = cntWeights[found];
+
+            if (found == count)
+            {
+                // new entry
+                cntJoints[found]  = *pJointInd;
+                rTotalWeight = *pWeight;
+                ++count;
+            }
+            else
+            {
+                // already exists
+                rTotalWeight += *pWeight;
+            }
+
+            // track highest on the fly
+            if (cntWeights[top] < rTotalWeight)
+            {
+                top = found;
+            }
+
+            ++pJointInd;
+            ++pWeight;
+        }
+        ++pInd;
+    }
+
+    return cntJoints[top];
+}
 
 glm::mat4 node_transform(tinygltf::Node const& node)
 {
@@ -402,6 +567,110 @@ McRay shoop_da_whoop(glm::vec3 origin, glm::vec3 dir, int triCount, glm::vec3 co
 McRay shoop_da_woop_salad(glm::vec3 origin, glm::vec3 dir, SaladModel const& salad)
 {
     return shoop_da_whoop(origin, dir, salad.m_rayMesh.triangleCount, salad.m_Pos.data(), salad.m_rayMesh.indices);
+}
+
+McRaySalad lazor_salads(glm::vec3 origin, glm::vec3 dir, Salads_t const& salads)
+{
+    McRaySalad mcRayOut;
+    mcRayOut.m_mcray.m_dist = std::numeric_limits<float>::max();
+    mcRayOut.m_salad = -1;
+    for (int i = 0; i < salads.size(); i ++)
+    {
+        if ( ! bool(salads[i]))
+        {
+            continue;
+        }
+
+        SaladModel const& salad = *salads[i];
+
+        McRay mcray = shoop_da_woop_salad(origin, dir, salad);
+        if (mcRayOut.m_mcray.m_dist > mcray.m_dist)
+        {
+            mcRayOut.m_mcray = mcray;
+            mcRayOut.m_salad = i;
+        }
+    }
+    return mcRayOut;
+}
+
+void update_expressions(Soul &rSoul, float delta)
+{
+    rSoul.m_blinkCdn -= delta;
+
+    if (rSoul.m_blinkCdn <= 0.0f)
+    {
+        rSoul.m_blinkCdn = rand_dist(rSoul.m_blinkPeriodMargin) + rSoul.m_blinkPeriodAvg;
+    }
+
+    rSoul.m_breathCycle += delta * rSoul.m_breathSpeed;
+    rSoul.m_breathCycle -= float(rSoul.m_breathCycle > 1.0f);
+}
+
+void update_apples(Apples &rApples, meshdeform::Joints const& rJoints)
+{
+    for (apple_id_t id = 0; id < rApples.m_ids.capacity(); id ++)
+    {
+        if ( ! rApples.m_ids.exists(id))
+        {
+            continue;
+        }
+
+        auto const &apl = rApples.m_data[id];
+
+        rApples.m_dataOut[id] = rJoints.m_nodeTf[apl.m_jointParent] * apl.m_tf;
+    }
+}
+
+// lol
+float const eyeDepth = 0.03f;
+float const eyeRadius = 0.09f;
+float const eyeFov = glm::atan(eyeRadius / eyeDepth) * 2.0f;
+
+glm::vec2 calc_eye_pos(glm::mat4x4 const& eyeTf, glm::vec3 tgt)
+{
+
+    glm::mat4 eyeMatrix = glm::perspective(eyeFov, 1.0f, 0.001f, 1000.0f)
+                        * glm::lookAt(glm::vec3(eyeTf[3]) - glm::vec3(eyeTf[2]) * eyeDepth,
+                                      glm::vec3(eyeTf[3]) + glm::vec3(eyeTf[2]),
+                                      glm::vec3(eyeTf[1]));
+
+    glm::vec3 foo = eyeMatrix * glm::vec4(tgt, 1.0f);
+    foo.x /= foo.z;
+    foo.y /= foo.z;
+
+    return glm::vec2(foo);
+}
+
+bool eye_visible(glm::mat4x4 const& eyeTf, glm::vec3 tgt) noexcept
+{
+    float const ang = glm::angle(glm::vec3(eyeTf[2]), tgt - glm::vec3(eyeTf[3]));
+    return ang < eyeFov;
+}
+
+void draw_iris(Texture2D texture, int i, glm::vec2 pos)
+{
+    constexpr float const w = 128.0f, h = 128.0f, r = 64.0f, c = 32.0f;
+
+    float const len = glm::min(glm::length(pos) * r, c);
+    pos = glm::normalize(pos) * glm::vec2{-1.0f, 1.0f} * len;
+
+    float const x = 128 * i, y = 128;
+    float const xlapP = glm::clamp(pos.x, 0.0f, w);
+    float const xlapN = glm::clamp(pos.x, -w, 0.0f);
+    DrawTexturePro(texture,
+                   Rectangle{-xlapN,            0,          w - xlapP + xlapN,  -h},
+                   Rectangle{x + pos.x - xlapN, y + pos.y,  w - xlapP + xlapN,  h},
+                   Vector2{0, 0}, 0.0f, WHITE);
+}
+
+void update_inputs_rl(Camera const& cam, Inputs& rInputs)
+{
+    Vector2 mousePos = GetMousePosition();
+    Ray ray = GetMouseRay(mousePos, cam);
+
+    rInputs.m_mousePos      = {mousePos.x, mousePos.y};
+    rInputs.m_mouseOrig     = {ray.position.x, ray.position.y, ray.position.z};
+    rInputs.m_mouseDir      = {ray.direction.x, ray.direction.y, ray.direction.z};
 }
 
 }

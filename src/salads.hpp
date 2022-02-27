@@ -130,6 +130,82 @@ struct Burger
     std::size_t m_count;
 };
 
+// Mesh lazoring
+
+struct McRay
+{
+    glm::vec2   m_barypos;
+    float       m_dist;
+    int         m_index;
+};
+
+struct McRaySalad
+{
+    McRay           m_mcray;
+    salad_id_t      m_salad;
+};
+// tools
+
+using tool_id_t = int;
+
+struct Inputs
+{
+    tool_id_t               m_selected;
+
+    glm::vec2               m_mousePos;
+    glm::vec3               m_mouseOrig;
+    glm::vec3               m_mouseDir;
+//    bool                    m_mouseLPrev;
+//    bool                    m_mouseRPrev;
+//    bool                    m_mouseL;
+//    bool                    m_mouseR;
+
+    McRaySalad              m_lazor;
+};
+
+struct ToolGrab
+{
+    struct Grab
+    {
+        //salad_id_t          m_salad;
+        //int                 m_triangle;
+        //glm::vec2           m_barypos;
+        //glm::vec3           m_pullTo;
+        int baitId;
+    };
+
+    tool_id_t               m_id;
+
+    std::vector<Grab>       m_grabs;
+    bool                    m_active;
+
+};
+
+inline bool g_limits{true};
+
+void update_tool_grab(
+        Salads_t const& salads,
+        WetJoints const& wet,
+        FrogDyn& rFrogs,
+        Inputs& rInputs,
+        ToolGrab& rToolGrab);
+
+int paw_default_base_attribute(meshdeform::MeshJoints const& joints, unsigned short const *pInd);
+
+void update_expressions(Soul &rSoul, float delta);
+
+inline float breath_cycle(float t) noexcept
+{
+    float const tau = glm::pi<float>() * 2.0f;
+    return glm::sin(tau*(t - 0.25f)) + 0.2f * sin(tau*2*t) + 1.0;
+}
+
+inline float rand_dist(float dist) noexcept
+{
+    float woot = GetRandomValue(-65536, 65536) / 65536.0f;
+    return woot * woot * glm::sign(woot) * dist;
+}
+
 template<typename T>
 Burger<T> drivethrough(tinygltf::Model const& gltf, int accessorId)
 {
@@ -169,59 +245,23 @@ void metal_pipe(
         std::vector<Material>&      rMaterials,
         FrogDyn&                    rFrogs);
 
-// Mesh lazoring
-
-struct McRay
-{
-    glm::vec2   m_barypos;
-    float       m_dist;
-    int         m_index;
-};
-
-struct McRaySalad
-{
-    McRay           m_mcray;
-    salad_id_t      m_salad;
-};
 
 McRay shoop_da_whoop(glm::vec3 origin, glm::vec3 dir, int triCount, glm::vec3 const* pVrt, unsigned short const* pInd);
 
 McRay shoop_da_woop_salad(glm::vec3 origin, glm::vec3 dir, SaladModel const& salad);
 
-// tools
+McRaySalad lazor_salads(glm::vec3 origin, glm::vec3 dir, Salads_t const& salads);
 
-using tool_id_t = int;
+void update_apples(Apples &rApples, meshdeform::Joints const& rJoints);
 
-struct Inputs
-{
-    tool_id_t               m_selected;
+glm::vec2 calc_eye_pos(glm::mat4x4 const& eyeTf, glm::vec3 tgt);
 
-    glm::vec2               m_mousePos;
-    glm::vec3               m_mouseOrig;
-    glm::vec3               m_mouseDir;
-//    bool                    m_mouseLPrev;
-//    bool                    m_mouseRPrev;
-//    bool                    m_mouseL;
-//    bool                    m_mouseR;
+bool eye_visible(glm::mat4x4 const& eyeTf, glm::vec3 tgt) noexcept;
 
-    McRaySalad              m_lazor;
-};
+void draw_iris(Texture2D texture, int i, glm::vec2 pos);
 
-struct ToolGrab
-{
-    struct Grab
-    {
-        //salad_id_t          m_salad;
-        //int                 m_triangle;
-        //glm::vec2           m_barypos;
-        //glm::vec3           m_pullTo;
-        int baitId;
-    };
+void update_inputs_rl(Camera const& cam, Inputs& rInputs);
 
-    tool_id_t               m_id;
 
-    std::vector<Grab>       m_grabs;
-    bool                    m_active;
-};
 
 }

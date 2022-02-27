@@ -138,6 +138,13 @@ struct BaitOptions
     float m_alignP, m_alignD;
 };
 
+inline glm::vec3 oppose(glm::vec3 in, float amount) noexcept
+{
+    float const len = glm::length(in);
+    float const drag = 1.0f / len * glm::max(0.0f, len - amount);
+    return glm::isnan(drag) ? in : in * drag;
+}
+
 void apply_baits(FrogDyn &rDyn, BaitOptions opt, float delta);
 void apply_ext_forces(FrogDyn &rDyn, float delta);
 void apply_cst_forces(FrogDyn &rDyn, float delta);

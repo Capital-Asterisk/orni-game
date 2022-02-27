@@ -1,6 +1,7 @@
 #pragma once
 
 struct Font;
+struct Shader;
 
 namespace orni
 {
