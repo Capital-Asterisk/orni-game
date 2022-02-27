@@ -21,6 +21,35 @@ namespace orni
 
 struct TestSceneC
 {
+    ~TestSceneC()
+    {
+        // LOL
+        for (Image &rImage : m_gltfRayImage)
+        {
+            UnloadImage(rImage);
+        }
+        for (Texture &rTex : m_gltfRayTextures)
+        {
+            UnloadTexture(rTex);
+        }
+        for (Material &rMat : m_gltfRayMaterials)
+        {
+            UnloadMaterial(rMat);
+        }
+        UnloadMesh(m_cube);
+        UnloadRenderTexture(m_ui);
+        UnloadMaterial(m_mat);
+
+        for (std::unique_ptr<SaladModel>& pSalad : m_salads)
+        {
+            if (!bool(pSalad))
+            {
+                continue;
+            }
+            rlUnloadVertexArray(pSalad->m_rayMesh.vaoId);
+        }
+    }
+
     Salads_t                m_salads;
     FrogDyn                 m_frogs;
 
@@ -48,6 +77,9 @@ struct TestSceneC
     float                   m_camYaw{0.0f};
     float                   m_camPitch{0.0f};
     float                   m_time{0.0f};
+    bool                    m_gravity{false};
+
+
 };
 
 static void update_apples(Apples &rApples, meshdeform::Joints const& rJoints)
@@ -131,17 +163,94 @@ static McRaySalad lazor_salads(glm::vec3 origin, glm::vec3 dir, Salads_t const& 
     return mcRayOut;
 }
 
-static void update_tool_grab(Salads_t const& salads, Inputs& rInputs, ToolGrab& rGrab)
+static int paw_default_base_attribute(meshdeform::MeshJoints const& joints, unsigned short const *pInd)
 {
-    bool const selected = rInputs.m_selected == rGrab.m_id;
+    // Figure out which joint is associated with a triangle
+    // 3 vertices each with 4 joints each with a weight
+    // make a mini histogram!
+    int                             count       = 0;
+    int                             top         = 0;
+    static constexpr int            fox         = 12;
+    std::array<unsigned char, fox>  cntJoints;
+    std::array<float, fox>          cntWeights;
 
-    if (rGrab.m_active)
+
+    // loop through 3 vertices
+    for (int i = 0; i < 3; ++i)
+    {
+        int const           index           = (*pInd) * 4;
+        unsigned char const *pJointInd      = &joints.m_pJointsIn[index];
+        float const         *pWeight        = &joints.m_pWeightsIn[index];
+        //std::cout << "Vertex " << (*pInd) << "\n";
+        for (int j = 0; j < 4; ++j)
+        {
+            if ((*pWeight) < 0.001)
+            {
+                continue;
+            }
+            //std::cout << "* Joint: " << int(*pJointInd) << " @" << (*pWeight) << "\n";
+
+            auto const  pBegin  = cntJoints.begin();
+            auto const  pEnd    = cntJoints.begin() + count;
+            int         found   = std::distance(pBegin, std::find(pBegin, pEnd, *pJointInd));
+
+            float &rTotalWeight = cntWeights[found];
+
+            if (found == count)
+            {
+                // new entry
+                cntJoints[found]  = *pJointInd;
+                rTotalWeight = *pWeight;
+                ++count;
+            }
+            else
+            {
+                // already exists
+                rTotalWeight += *pWeight;
+            }
+
+            // track highest on the fly
+            if (cntWeights[top] < rTotalWeight)
+            {
+                top = found;
+            }
+
+            ++pJointInd;
+            ++pWeight;
+        }
+        ++pInd;
+    }
+
+    return cntJoints[top];
+}
+
+bool g_limits{true};
+
+static void update_tool_grab(
+        Salads_t const& salads,
+        WetJoints const& wet,
+        FrogDyn& rFrogs,
+        Inputs& rInputs,
+        ToolGrab& rToolGrab)
+{
+    bool const selected = rInputs.m_selected == rToolGrab.m_id;
+
+    if (rToolGrab.m_active)
     {
         if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
-            rGrab.m_active = false;
+            // release
+            rToolGrab.m_active = false;            
+            int id = rToolGrab.m_grabs.back().baitId;
+            rToolGrab.m_grabs.pop_back();
+            auto found = std::find_if(rFrogs.m_baits.begin(), rFrogs.m_baits.end(), [id] (FrogDyn::Bait const& bait) { return bait.m_id == id; });
+
+            rFrogs.m_baits.erase(found);
         }
-        std::cout << "grab\n";
+        else if (IsKeyPressed(KEY_SPACE))
+        {
+            rToolGrab.m_active = false;
+        }
     }
     else if (selected && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
     {
@@ -153,12 +262,73 @@ static void update_tool_grab(Salads_t const& salads, Inputs& rInputs, ToolGrab& 
 
         if (rInputs.m_lazor.m_salad != -1)
         {
-            rGrab.m_active = true;
+            SaladModel const&               salad       = *salads.at(rInputs.m_lazor.m_salad);
+
+            //std::cout << "Connected joint: " << int(cntJoints[top]) << "\n";
+
+            // get joint, then linear search for connected frog
+            int const joint = paw_default_base_attribute(salad.m_spookM, &salad.m_rayMesh.indices[rInputs.m_lazor.m_mcray.m_index * 3]);
+
+            auto foundIt = std::find_if(
+                        wet.m_hoppers.begin(), wet.m_hoppers.end(),
+                        [joint] (WetJoints::Hopper const& hopper)
+            {
+                return hopper.m_joint == joint;
+            });
+
+            if (foundIt != wet.m_hoppers.end())
+            {
+                ToolGrab::Grab &rGrab = rToolGrab.m_grabs.emplace_back();
+
+                frog_id_t const frog = foundIt->m_frog;
+
+                // add bait
+                glm::vec3 const down{0.0f, -1.0f, 0.0f};
+                glm::vec3 const fwd{0.0f, 0.0f, 1.0f};
+                glm::vec3 const lazorHit = rInputs.m_mouseOrig + rInputs.m_mouseDir * rInputs.m_lazor.m_mcray.m_dist;
+                glm::vec3 const frogInvHit = glm::inverse(rFrogs.m_tf[frog]) * glm::vec4(lazorHit, 1.0f);
+
+                rToolGrab.m_active = true;
+                rGrab.baitId = 420 + rToolGrab.m_grabs.size();
+
+                FrogDyn::Bait &rBait = rFrogs.m_baits.emplace_back(
+                            FrogDyn::Bait{ {-1,  lazorHit, down, fwd},
+                                           {frog,   frogInvHit, down, fwd} });
+                rBait.m_id = rGrab.baitId;
+                if (g_limits)
+                {
+                    rBait.m_forceLim = 15.2f * 10.0f * 3.0f;
+                }
+                //rBait.m_strengthMul = 0.2f;
+
+                //rFrogs.m_extImp[frog].m_lin += rInputs.m_mouseDir * 10.0f;
+            }
         }
     }
+
+     if (rToolGrab.m_active)
+     {
+         ToolGrab::Grab &rGrab = rToolGrab.m_grabs.back();
+
+         for (FrogDyn::Bait &rBait : rFrogs.m_baits)
+         {
+             if (rBait.m_id != rGrab.baitId)
+             {
+                 continue;
+             }
+
+             float const dist = glm::length(rBait.m_a.m_offset - rInputs.m_mouseOrig);
+             rBait.m_a.m_offset = rInputs.m_mouseOrig + rInputs.m_mouseDir * dist;
+
+             rFrogs.m_vel[rBait.m_b.m_id].m_lin *= 0.0f;
+             //rFrogs.m_vel[rBait.m_b.m_id].m_ang *= 0.0f;
+
+             break;
+         }
+     }
 }
 
-static void draw_scene(TestSceneC &rScene)
+static void draw_scene(TestSceneC &rScene, GameState &rGame)
 {
     auto &t = rScene.m_time;
 
@@ -170,11 +340,6 @@ static void draw_scene(TestSceneC &rScene)
     rScene.m_camDist += (float(IsKeyDown(KEY_Z)) - float(IsKeyDown(KEY_X))) * delta * 2.0f;
 
     reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
-    //rScene.m_camera.position = Vector3{ std::sin(rScene.m_camAngle) * rScene.m_camDist, 3.0f, std::cos(rScene.m_camAngle) * rScene.m_camDist };
-    //rScene.m_camera.position = Vector3{ std::sin(t * 3.14159f * 0.1f) * 2.0f, 2.0f, std::cos(t * 3.14159f * 0.1f) * 2.0f };
-
-    //rScene.m_characters[0].m_joints.m_nodeTf[3] *= glm::axisAngleMatrix(glm::vec3{1.0f, 0.0f, 0.0f}, std::sin(t * glm::pi<float>() * 2.0f * 2.066666f) * 0.1f);
-    //rScene.m_characters[0].m_joints.m_nodeTf[3] *= glm::scale(glm::vec3{0.998f, 0.998f, 0.998f});
 
     CharB &rChar = rScene.m_characters.begin()->second;
 
@@ -194,14 +359,16 @@ static void draw_scene(TestSceneC &rScene)
     update_inputs_rl(rScene.m_camera, rScene.m_inputs);
     rScene.m_inputs.m_selected = 0;
     rScene.m_inputs.m_lazor.m_salad = -1;
-    update_tool_grab(rScene.m_salads, rScene.m_inputs, rScene.m_toolGrab);
+    update_tool_grab(rScene.m_salads, rChar.m_wetJoints, rScene.m_frogs, rScene.m_inputs, rScene.m_toolGrab);
 
-    if (IsKeyDown(KEY_SPACE))
+    if (IsKeyPressed(KEY_G))
     {
-        for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
-        {
-            rScene.m_frogs.m_vel[i].m_lin *= 0.50f;
-        }
+        rScene.m_gravity = !rScene.m_gravity;
+    }
+
+    if (IsKeyPressed(KEY_E))
+    {
+        g_limits = !g_limits;
     }
 
     if (IsKeyDown(KEY_R))
@@ -222,8 +389,8 @@ static void draw_scene(TestSceneC &rScene)
 
     if (IsKeyDown(KEY_F))
     {
-        rScene.m_frogs.m_scale[5] += 0.05f;
-        rScene.m_frogs.m_mass[5] += 0.05f;
+//        rScene.m_frogs.m_scale[14] += 0.05f;
+//        rScene.m_frogs.m_mass[14] += 0.02f;
     }
 
     if (IsKeyDown(KEY_LEFT_ALT))
@@ -234,10 +401,10 @@ static void draw_scene(TestSceneC &rScene)
         }
     }
 
-    for (int i = 0; i < 1; i ++)
+    for (int i = 0; i < rScene.m_frogs.m_ids.capacity(); i ++)
     {
         // apply gravity
-        //rScene.m_frogs.m_extImp[i].m_lin.y -= 9.81f * delta * rScene.m_frogs.m_mass[i];
+        rScene.m_frogs.m_extImp[i].m_lin.y -= 9.81f * delta * rScene.m_frogs.m_mass[i] * rScene.m_gravity;
 
         rScene.m_frogs.m_extImp[i].m_lin += push;
 
@@ -253,13 +420,34 @@ static void draw_scene(TestSceneC &rScene)
     {
         float smldelta = delta * cstPercent / float(rScene.m_cstSteps);
 
-        apply_baits(rScene.m_frogs, {16.0f, 0.1f, 16.0f, 0.25f, 16.0f, 0.25f, 16.0f, 0.25f}, smldelta);
+        apply_baits(rScene.m_frogs, {64.0f, 0.3f, 16.0f, 0.5f, 8.0f, 0.2f, 8.0f, 0.25f}, smldelta);
 
         apply_cst_forces(rScene.m_frogs, smldelta);
 
         calc_balls_pos(rScene.m_frogs);
 
         calc_frog_collisions(rScene.m_frogs);
+    }
+
+    float const angdrag = delta * 2.0f;
+    float const lindrag = delta * 2.0f;
+
+    // apply drag
+    for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
+    {
+        float const anglength = glm::length(rScene.m_frogs.m_vel[i].m_ang);
+        if (anglength > 0.001)
+        {
+            rScene.m_frogs.m_vel[i].m_ang = rScene.m_frogs.m_vel[i].m_ang / anglength * glm::max(0.0f, anglength - angdrag);
+        }
+
+        float const linlength = glm::length(rScene.m_frogs.m_vel[i].m_lin);
+        if (anglength > 0.001)
+        {
+            rScene.m_frogs.m_vel[i].m_lin = rScene.m_frogs.m_vel[i].m_lin / linlength * glm::max(0.0f, linlength - lindrag);
+        }
+
+        //rScene.m_frogs.m_vel[i].m_lin *= 0.998f;
     }
 
     // Update hoppers
@@ -296,11 +484,28 @@ static void draw_scene(TestSceneC &rScene)
 
     }
 
-    Ray ray = GetMouseRay(GetMousePosition(), rScene.m_camera);
-    glm::vec3 const rayOrig = reinterpret_cast<glm::vec3&>(ray.position);
-    glm::vec3 const rayDir = reinterpret_cast<glm::vec3&>(ray.direction);
+
+    glm::vec3 avgPos{0.0f};
+    float totalMass = 0.0f;
+    // draw frogs
+    for (frog_id_t id = 0; id < rScene.m_frogs.m_ids.capacity(); id ++)
+    {
+        if (!rScene.m_frogs.m_ids.exists(id))
+        {
+            continue;
+        }
+        avgPos += glm::vec3(rScene.m_frogs.m_tf[id][3]) * rScene.m_frogs.m_mass[id];
+        totalMass += rScene.m_frogs.m_mass[id];
+    }
+
+    avgPos /= totalMass;
+
+    //reinterpret_cast<glm::vec3&>(rScene.m_camera.target) =  avgPos;
+    //reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
+
 
     BeginDrawing();
+
 
         ClearBackground(Color{ 10, 10, 10, 100 });
 
@@ -311,9 +516,19 @@ static void draw_scene(TestSceneC &rScene)
 
             ClearBackground(Color{ 0, 0, 0, 0 });
 
+            int const g = 128;
+            int gx = int(t * 2) % 8;
+            int gy = 1;
+            float ox = gx * g;
+            float oy = gy * g * 2;
+            float wy = oy + g;
+            Rectangle const rectR{0, g, g, g};
+            Rectangle const rectL{g, g, g, g};
+
+
             // white stuff 1
-            DrawTexturePro(rChar.m_eyeSheet, Rectangle{128, 128, -128, -128}, Rectangle{0, 128, 128, 128}, Vector2{0, 0}, 0.0f, WHITE);
-            DrawTexturePro(rChar.m_eyeSheet, Rectangle{128, 128, 128, -128}, Rectangle{128, 128, 128, 128}, Vector2{0, 0}, 0.0f, WHITE);
+            DrawTexturePro(rChar.m_eyeSheet, {ox, wy, -g, -g}, rectR, {}, 0.0f, WHITE);
+            DrawTexturePro(rChar.m_eyeSheet, {ox, wy, g, -g}, rectL, {}, 0.0f, WHITE);
 
             // irises
             draw_iris(rChar.m_eyeSheet, 0, eyePosR);
@@ -322,13 +537,13 @@ static void draw_scene(TestSceneC &rScene)
             // erase overlap
             BeginBlendMode(BLEND_CUSTOM);
                 rlSetBlendFactors(0, 770, 32774);
-                DrawTexturePro(rChar.m_eyeSheet, Rectangle{128, 128, -128, -128}, Rectangle{0, 128, 128, 128}, Vector2{0, 0}, 0.0f, WHITE);
-                DrawTexturePro(rChar.m_eyeSheet, Rectangle{128, 128, 128, -128}, Rectangle{128, 128, 128, 128}, Vector2{0, 0}, 0.0f, WHITE);
+                DrawTexturePro(rChar.m_eyeSheet, {ox, wy, -g, -g}, rectR, {}, 0.0f, WHITE);
+                DrawTexturePro(rChar.m_eyeSheet, {ox, wy, g, -g}, rectL, {}, 0.0f, WHITE);
             EndBlendMode();
 
             // outline
-            DrawTexturePro(rChar.m_eyeSheet, Rectangle{128, 0, -128, -128}, Rectangle{0, 128, 128, 128}, Vector2{0, 0}, 0.0f, WHITE);
-            DrawTexturePro(rChar.m_eyeSheet, Rectangle{128, 0, 128, -128}, Rectangle{128, 128, 128, 128}, Vector2{0, 0}, 0.0f, WHITE);
+            DrawTexturePro(rChar.m_eyeSheet, {ox, oy, -g, -g}, rectR, {}, 0.0f, WHITE);
+            DrawTexturePro(rChar.m_eyeSheet, {ox, oy, g, -g}, rectL, {}, 0.0f, WHITE);
         EndTextureMode();
 
         BeginMode3D(rScene.m_camera);
@@ -340,6 +555,10 @@ static void draw_scene(TestSceneC &rScene)
                 DrawModel(rScene.m_salads[2]->m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
                 DrawModel(rScene.m_salads[3]->m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
                 DrawModel(rScene.m_salads[1]->m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
+
+                //glm::vec3 lol = rScene.m_inputs.m_mouseOrig + rScene.m_inputs.m_mouseDir * rScene.m_inputs.m_lazor.m_mcray.m_dist;
+                //DrawSphereWires(reinterpret_cast<Vector3&>(lol), 0.01f, 4, 4, GREEN);
+
             EndBlendMode();
         EndMode3D();
 
@@ -349,44 +568,7 @@ static void draw_scene(TestSceneC &rScene)
 
             BeginMode3D(rScene.m_camera);
 
-#if 1
-            {
-                RayCollision colinfo = GetRayCollisionModel(ray, rScene.m_salads[0]->m_rayModel);
-                DrawSphereWires(colinfo.point, 0.01f, 2, 4, MAGENTA);
-            }
-            {
-                RayCollision colinfo = GetRayCollisionModel(ray, rScene.m_salads[1]->m_rayModel);
-                DrawSphereWires(colinfo.point, 0.01f, 2, 4, MAGENTA);
-            }
-            {
-                RayCollision colinfo = GetRayCollisionModel(ray, rScene.m_salads[2]->m_rayModel);
-                DrawSphereWires(colinfo.point, 0.01f, 2, 4, MAGENTA);
-            }
-            {
-                RayCollision colinfo = GetRayCollisionModel(ray, rScene.m_salads[3]->m_rayModel);
-                DrawSphereWires(colinfo.point, 0.01f, 2, 4, MAGENTA);
-            }
-#endif
-
-            {
-                McRay mcray = shoop_da_woop_salad(rayOrig, rayDir, *rScene.m_salads[1]);
-                glm::vec3 hitpos = rayOrig + mcray.m_dist * rayDir;
-                DrawSphereWires(reinterpret_cast<Vector3&>(hitpos), 0.01f, 2, 4, YELLOW);
-            }
-            {
-                McRay mcray = shoop_da_woop_salad(rayOrig, rayDir, *rScene.m_salads[2]);
-                glm::vec3 hitpos = rayOrig +  mcray.m_dist * rayDir;
-                DrawSphereWires(reinterpret_cast<Vector3&>(hitpos), 0.01f, 2, 4, GREEN);
-            }
-            {
-                McRay mcray = shoop_da_woop_salad(rayOrig, rayDir, *rScene.m_salads[3]);
-                glm::vec3 hitpos = rayOrig + mcray.m_dist * rayDir;
-                DrawSphereWires(reinterpret_cast<Vector3&>(hitpos), 0.01f, 2, 4, SKYBLUE);
-            }
-
 #if 0
-                glm::vec3 avgPos{0.0f};
-                float totalMass = 0.0f;
                 // draw frogs
                 for (frog_id_t id = 0; id < rScene.m_frogs.m_ids.capacity(); id ++)
                 {
@@ -394,8 +576,6 @@ static void draw_scene(TestSceneC &rScene)
                     {
                         continue;
                     }
-                    avgPos += glm::vec3(rScene.m_frogs.m_tf[id][3]) * rScene.m_frogs.m_mass[id];
-                    totalMass += rScene.m_frogs.m_mass[id];
 
                     auto tf = rScene.m_frogs.m_tf[id];
                     auto transposed = glm::transpose(tf);
@@ -451,18 +631,10 @@ static void draw_scene(TestSceneC &rScene)
 
                 }
 
-
-
-
-            DrawSphere(Vector3{0.0f, 0.0f, 0.0f}, 0.05f, Color{255, 0, 0, 255});
-            if (glm::mod(t, 0.1f) < 0.1f/2.0f)
-            {
-                glm::vec3 wok = rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple][3] + rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple][2];
-                DrawSphere(reinterpret_cast<Vector3&>(rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple][3]), 0.01f, GREEN);
-                DrawLine3D(reinterpret_cast<Vector3&>(rScene.m_apples.m_dataOut[rChar.m_eyeL.m_apple][3]), reinterpret_cast<Vector3&>(wok), BLUE);
-            }
 #endif
             EndMode3D();
+
+            DrawTextEx(*rGame.m_pFont, "What is the best way to immobilize caT?", Vector2{10.0, 100.0}, 20, 0, WHITE);
 
             DrawRectangle(10, 10, 50, 25, Color{255, 255, 255, 255});
 
@@ -487,7 +659,11 @@ static void draw_scene(TestSceneC &rScene)
 }
 
 
-
+#if defined(PLATFORM_DESKTOP)
+    #define GLSL_VERSION            330
+#else   // PLATFORM_RPI, PLATFORM_ANDROID, PLATFORM_WEB
+    #define GLSL_VERSION            100
+#endif
 
 SceneFunc_t gen_test_scene_c()
 {
@@ -551,6 +727,7 @@ SceneFunc_t gen_test_scene_c()
     rScene.m_cube = GenMeshCube(0.04545f, 0.1f, 0.01136f);
     rScene.m_mat = LoadMaterialDefault();
 
+
     rScene.m_ui = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
 
 
@@ -561,7 +738,7 @@ SceneFunc_t gen_test_scene_c()
 
     return [pScene = std::move(pScene)] (GameState &rGame) -> void
     {
-        draw_scene(*pScene);
+        draw_scene(*pScene, rGame);
     };
 }
 

@@ -11,6 +11,12 @@
 
 using namespace frogdyn;
 
+inline glm::vec3 limit_length(glm::vec3 const in, float max) noexcept
+{
+    float const len = glm::length(in);
+    return (len <= max) ? (in) : (in / len * max);
+}
+
 void frogdyn::apply_baits(FrogDyn &rDyn, BaitOptions opt, float delta)
 {
     static glm::mat4x4 const mcidentity{1.0f};
@@ -131,17 +137,17 @@ void frogdyn::apply_baits(FrogDyn &rDyn, BaitOptions opt, float delta)
         }
 
 
-        glm::vec3 const     normalLinImp = (posRel * opt.m_linP + velRel * opt.m_linD) * minMass;
+        glm::vec3 const     normalLinImp = limit_length((posRel * opt.m_linP + velRel * opt.m_linD) * minMass, rBait.m_forceLim * delta);
         glm::vec3 const     normalAngImp = normalLinImp;
 
         if (! worldA)
         {
             rDyn.m_cstImp[rBait.m_a.m_id].m_lin += normalLinImp;
-            rDyn.m_cstImp[rBait.m_a.m_id].m_ang += glm::cross(offsetRotA, normalAngImp) + angImpA;
+            rDyn.m_cstImp[rBait.m_a.m_id].m_ang += (glm::cross(offsetRotA, normalAngImp) + angImpA);
         }
 
         rDyn.m_cstImp[rBait.m_b.m_id].m_lin += -normalLinImp;
-        rDyn.m_cstImp[rBait.m_b.m_id].m_ang += -glm::cross(offsetRotB, normalAngImp) + angImpB;
+        rDyn.m_cstImp[rBait.m_b.m_id].m_ang += (-glm::cross(offsetRotB, normalAngImp) + angImpB);
     }
 }
 

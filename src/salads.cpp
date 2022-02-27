@@ -95,7 +95,7 @@ void metal_rod(
                 // Create bait
                 FrogDyn::Bait       &rBait      = rFrogs.m_baits.emplace_back();
 
-                glm::vec4 const     side        {glm::vec3{nodeTfWorld[2]}, 0.0f};
+                glm::vec4 const     side        {glm::vec3{nodeTfWorld[0]}, 0.0f};
                 glm::vec4 const     dir         {glm::vec3{nodeTfWorld[1]}, 0.0f}; // Y is forward for blender
 
                 glm::mat4x4 const   nodeTfInv   = glm::inverse(frogTfWorld);

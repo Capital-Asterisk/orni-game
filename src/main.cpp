@@ -50,6 +50,11 @@ int main(int argc, char** argv)
     SetConfigFlags(FLAG_WINDOW_TRANSPARENT);
     InitWindow(screenWidth, screenHeight, "Nice");
 
+    // default resources
+    static Font defaultFont = LoadFontEx("Tuffy-Bold.ttf", 20, 0, 0);
+    SetTextureFilter(defaultFont.texture, TEXTURE_FILTER_BILINEAR);
+    g_gameState.m_pFont = &defaultFont;
+
     load_default_scene();
 
 #if defined(PLATFORM_WEB)

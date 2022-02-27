@@ -17,6 +17,8 @@ namespace frogdyn
 {
 
 using frog_id_t = int;
+using bait_id_t = int;
+
 
 struct AABB
 {
@@ -60,10 +62,15 @@ struct FrogDyn
         Bait() = default;
         Bait(Insect a, Insect b) : m_a{a}, m_b{b} { }
 
+        bait_id_t m_id{lgrn::id_null<bait_id_t>()};
+
         Insect m_a, m_b;
 
         // rotation needed to rotate B into A's space
         glm::quat m_origin{};
+
+        float m_strengthMul{1.0f};
+        float m_forceLim{10000.0f};
 
         float m_twistRange;
         float m_twistSpring;

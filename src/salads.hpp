@@ -82,6 +82,7 @@ struct WetJoints : meshdeform::Joints
     std::vector<Hopper>     m_hoppers;
 };
 
+
 struct CharB
 {
     struct Eye
@@ -194,19 +195,17 @@ struct ToolGrab
 {
     struct Grab
     {
-        salad_id_t          m_salad;
-        int                 m_triangle;
-        glm::vec2           m_barypos;
-
-        glm::vec3           m_pullTo;
+        //salad_id_t          m_salad;
+        //int                 m_triangle;
+        //glm::vec2           m_barypos;
+        //glm::vec3           m_pullTo;
+        int baitId;
     };
 
     tool_id_t               m_id;
 
-    std::array<Grab, 8>     m_grabs;
-    int                     m_grabKeepCount;
+    std::vector<Grab>       m_grabs;
     bool                    m_active;
 };
-
 
 }
