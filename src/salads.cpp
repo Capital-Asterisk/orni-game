@@ -57,13 +57,23 @@ void metal_rod(
 {
     auto const &node = gltf.nodes[nodeId];
 
+    // record name
+    if (level != -1)
+    {
+        rChar.m_jointNames.at(nodeToJoint[nodeId]) = node.name;
+    }
+
     glm::mat4x4 const nodeTf = node_transform(node);
     glm::mat4x4 const nodeTfWorld = parentTfWorld * nodeTf;
+
+    frog_id_t frogId = lgrn::id_null<frog_id_t>();
+    float comwok = 0.12f;
+    glm::vec3 offset{0.0f, -comwok, 0.0f}; // bone length estimation lol
 
     // check for mass
     if (node.extras.IsObject()) // sure
     {
-        float comwok = 0.12f;
+
 
         if (tinygltf::Value const& massVal = node.extras.Get("mass"); massVal.IsNumber())
         {
@@ -71,14 +81,29 @@ void metal_rod(
             //std::cout << "MASSSS! " << mass << "\n";
 
             // Make a frog
-            glm::mat4x4 frogTfWorld = nodeTfWorld;
+            glm::mat4x4 frogTfWorld     = nodeTfWorld;
+            glm::mat4x4 const frogTfInv = glm::inverse(frogTfWorld);
             frogTfWorld[3] += nodeTfWorld[1] * comwok;
-            frog_id_t const frogId = frogdyn::add_frog(rFrogs, frogTfWorld, mass);
+            frogId = frogdyn::add_frog(rFrogs, frogTfWorld, mass);
 
             std::cout << "Bone[" << node.name << "] is Frog[" << frogId << "] with mass: " << mass << "\n";
 
             // Add hopper
             rChar.m_wetJoints.m_hoppers.emplace_back(WetJoints::Hopper{frogId, nodeToJoint[nodeId], -comwok});
+
+            // lazy record important frogs
+            if (node.name == "belly")
+            {
+                rChar.m_frogBelly = frogId;
+            }
+            else if (node.name == "beak")
+            {
+                rChar.m_frogBeak = frogId;
+            }
+            else if (node.name == "head")
+            {
+                rChar.m_frogHead = frogId;
+            }
 
             // connect to parent
             if (level != 0)
@@ -90,35 +115,16 @@ void metal_rod(
 
                 frog_id_t const     parentFrogId = foundIt->m_joint;
 
-                glm::vec3           offset      {0.0f, -comwok, 0.0f};
-
                 // Create bait
                 FrogDyn::Bait       &rBait      = rFrogs.m_baits.emplace_back();
 
                 glm::vec4 const     side        {glm::vec3{nodeTfWorld[0]}, 0.0f};
                 glm::vec4 const     dir         {glm::vec3{nodeTfWorld[1]}, 0.0f}; // Y is forward for blender
 
-                glm::mat4x4 const   nodeTfInv   = glm::inverse(frogTfWorld);
                 glm::mat4x4 const   parentTfInv = glm::inverse(parentTfWorld);
 
                 rBait.m_a = {parentFrogId, glm::vec3{nodeTf[3]} + offset, parentTfInv * dir, parentTfInv * side};
-                rBait.m_b = {frogId, offset, nodeTfInv * dir, nodeTfInv * side};
-
-//                rBait.m_doTwistLim = true;
-//                rBait.m_twistRange = 0.0f;
-
-//                rBait.m_doConeSpring = true;
-//                rBait.m_coneSpring = 20.0f;
-
-//                rBait.m_doAlign = true;
-
-//                rFrogs.m_scale[frogId] = 0.6f;
-
-                //"tlim", "tspr", "clim", "cspr", "align"
-//                float tlim = crab(node.extras, "tlim", 0.01);
-//                float tspr = crab(node.extras, "tspr", 0.01);
-//                float clim = crab(node.extras, "clim", 0.01);
-//                float cspr = crab(node.extras, "clim", 0.01);
+                rBait.m_b = {frogId, offset, frogTfInv * dir, frogTfInv * side};
 
                 if (tinygltf::Value const& patty = node.extras.Get("tlim"); patty.IsNumber())
                 {
@@ -155,6 +161,8 @@ void metal_rod(
         }
     }
 
+    std::vector<FrogDyn::Ball> balls;
+
     for (int childId : node.children)
     {
         auto const &child = gltf.nodes.at(childId);
@@ -162,6 +170,13 @@ void metal_rod(
         if (nodeToJoint[childId] == -1)
         {
             // Not bone
+
+            if (frogId != lgrn::id_null<frog_id_t>() && child.name.rfind("Ball") == 0)
+            {
+                std::cout << "BALL!\n";
+                glm::mat4x4 const ballTf = node_transform(child);
+                balls.emplace_back(FrogDyn::Ball{glm::vec3(ballTf[3]) + offset, glm::length(glm::vec3(ballTf[1])), 0, 0});
+            }
 
             if (child.name.rfind("Apl_EyeL") == 0)
             {
@@ -181,6 +196,14 @@ void metal_rod(
             metal_rod(nodeToJoint, gltf, childId, nodeId, level + 1, rFrogs, rChar, nodeTfWorld);
         }
     }
+
+    if (!balls.empty())
+    {
+        // balls contain pee
+        rFrogs.m_balls.emplace(frogId, balls.begin(), balls.end());
+        rFrogs.m_ballPos.emplace(frogId, balls.size());
+        rFrogs.m_canCollide.push_back(frogId);
+    }
 }
 
 void metal_bar(
@@ -196,7 +219,7 @@ void metal_bar(
     int useSkin = -1;
 
     // init eyes
-    rChar.m_eyeSheet = LoadTexture("eyessheet.png");
+    rChar.m_eyeSheet = LoadTexture("resources/textures/eyessheet.png");
     rChar.m_eyeTexture = LoadRenderTexture(256, 256);
     rChar.m_eyeMaterial = LoadMaterialDefault();
     SetMaterialTexture(&rChar.m_eyeMaterial, MATERIAL_MAP_DIFFUSE, rChar.m_eyeTexture.texture);
@@ -297,6 +320,7 @@ void metal_bar(
     rChar.m_joints.m_pInverseBindIn = invBindData.m_data;
 
     // initialize world transforms
+    rChar.m_jointNames.resize(jointCount);
     rChar.m_joints.m_nodeTf.resize(jointCount);
     rChar.m_joints.m_jointTf.resize(jointCount);
     for (int i = 0; i < jointCount; i ++)
@@ -315,6 +339,11 @@ void metal_bar(
             currBone ++;
         }
     }
+
+    rFrogs.m_balls.resize_ids(rFrogs.m_ids.capacity() + jointCount);
+    rFrogs.m_ballPos.resize_ids(rFrogs.m_ids.capacity() + jointCount);
+    rFrogs.m_balls.resize_data(gltf.nodes.size()); // ultra-safe assumption
+    rFrogs.m_ballPos.resize_data(gltf.nodes.size());
 
     // Iterate bones
     metal_rod(nodeToJoint, gltf, nodeId, -1, -1, rFrogs, rChar, glm::mat4x4(1.0f));

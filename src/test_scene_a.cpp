@@ -123,7 +123,7 @@ SceneFunc_t orni::gen_test_scene_a()
     std::string warn;
 
     tinygltf::TinyGLTF loader;
-    loader.LoadBinaryFromFile(&rScene.m_gltf, &err, &warn, "stick5.glb");
+    loader.LoadBinaryFromFile(&rScene.m_gltf, &err, &warn, "resources/gltf/stick5.glb");
 
     auto &rMeshes = rScene.m_gltf.meshes;
     auto &rAccessors = rScene.m_gltf.accessors;

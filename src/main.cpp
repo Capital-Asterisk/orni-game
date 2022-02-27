@@ -51,9 +51,11 @@ int main(int argc, char** argv)
     InitWindow(screenWidth, screenHeight, "Nice");
 
     // default resources
-    static Font defaultFont = LoadFontEx("Tuffy-Bold.ttf", 20, 0, 0);
+    static Font defaultFont = LoadFontEx("resources/Tuffy-Bold.ttf", 20, 0, 0);
     SetTextureFilter(defaultFont.texture, TEXTURE_FILTER_BILINEAR);
     g_gameState.m_pFont = &defaultFont;
+
+    SetRandomSeed(1337);
 
     load_default_scene();
 

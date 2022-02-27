@@ -9,6 +9,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/matrix_interpolation.hpp>
 #include <glm/gtx/string_cast.hpp>
+#include <glm/gtx/vector_angle.hpp>
 
 #include <iostream>
 #include <memory>
@@ -97,11 +98,15 @@ static void update_apples(Apples &rApples, meshdeform::Joints const& rJoints)
     }
 }
 
+// lol
+float const eyeDepth = 0.03f;
+float const eyeRadius = 0.09f;
+float const eyeFov = glm::atan(eyeRadius / eyeDepth) * 2.0f;
+
 static glm::vec2 calc_eye_pos(glm::mat4x4 const& eyeTf, glm::vec3 tgt)
 {
-    float eyeDepth = 0.03f;
-    float eyeRadius = 0.09f;
-    glm::mat4 eyeMatrix = glm::perspective(glm::atan(eyeRadius / eyeDepth) * 2.0f, 1.0f, 0.001f, 1000.0f)
+
+    glm::mat4 eyeMatrix = glm::perspective(eyeFov, 1.0f, 0.001f, 1000.0f)
                         * glm::lookAt(glm::vec3(eyeTf[3]) - glm::vec3(eyeTf[2]) * eyeDepth,
                                       glm::vec3(eyeTf[3]) + glm::vec3(eyeTf[2]),
                                       glm::vec3(eyeTf[1]));
@@ -111,6 +116,12 @@ static glm::vec2 calc_eye_pos(glm::mat4x4 const& eyeTf, glm::vec3 tgt)
     foo.y /= foo.z;
 
     return glm::vec2(foo);
+}
+
+static bool eye_visible(glm::mat4x4 const& eyeTf, glm::vec3 tgt)
+{
+    float const ang = glm::angle(glm::vec3(eyeTf[2]), tgt - glm::vec3(eyeTf[3]));
+    return ang < eyeFov;
 }
 
 static void draw_iris(Texture2D texture, int i, glm::vec2 pos)
@@ -224,6 +235,25 @@ static int paw_default_base_attribute(meshdeform::MeshJoints const& joints, unsi
     return cntJoints[top];
 }
 
+static float rand_dist(float dist)
+{
+    float woot = GetRandomValue(-65536, 65536) / 65536.0f;
+    return woot * woot * glm::sign(woot) * dist;
+}
+
+static void update_expressions(Soul &rSoul, float delta)
+{
+    rSoul.m_blinkCdn -= delta;
+
+    if (rSoul.m_blinkCdn <= 0.0f)
+    {
+        rSoul.m_blinkCdn = rand_dist(rSoul.m_blinkPeriodMargin) + rSoul.m_blinkPeriodAvg;
+    }
+
+    rSoul.m_breathCycle += delta * rSoul.m_breathSpeed;
+    rSoul.m_breathCycle -= float(rSoul.m_breathCycle > 1.0f);
+}
+
 bool g_limits{true};
 
 static void update_tool_grab(
@@ -328,6 +358,12 @@ static void update_tool_grab(
      }
 }
 
+static float breath_cycle(float t) noexcept
+{
+    float const tau = glm::pi<float>() * 2.0f;
+    return glm::sin(tau*(t - 0.25f)) + 0.2f * sin(tau*2*t) + 1.0;
+}
+
 static void draw_scene(TestSceneC &rScene, GameState &rGame)
 {
     auto &t = rScene.m_time;
@@ -422,6 +458,11 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
 
         apply_baits(rScene.m_frogs, {64.0f, 0.3f, 16.0f, 0.5f, 8.0f, 0.2f, 8.0f, 0.25f}, smldelta);
 
+        // beak-head spring workaround
+        glm::vec3 const axis = rScene.m_frogs.m_tf[rChar.m_frogBeak][0];
+        rScene.m_frogs.m_cstImp[rChar.m_frogBeak].m_ang -= axis * smldelta * 2.0f;
+        rScene.m_frogs.m_cstImp[rChar.m_frogHead].m_ang += axis * smldelta * 2.0f;
+
         apply_cst_forces(rScene.m_frogs, smldelta);
 
         calc_balls_pos(rScene.m_frogs);
@@ -429,7 +470,7 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
         calc_frog_collisions(rScene.m_frogs);
     }
 
-    float const angdrag = delta * 2.0f;
+    float const angdrag = delta * 1.0f;
     float const lindrag = delta * 2.0f;
 
     // apply drag
@@ -442,7 +483,7 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
         }
 
         float const linlength = glm::length(rScene.m_frogs.m_vel[i].m_lin);
-        if (anglength > 0.001)
+        if (linlength > 0.001)
         {
             rScene.m_frogs.m_vel[i].m_lin = rScene.m_frogs.m_vel[i].m_lin / linlength * glm::max(0.0f, linlength - lindrag);
         }
@@ -484,6 +525,10 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
 
     }
 
+    update_expressions(rChar.m_soul, delta);
+
+    // breathing
+    rScene.m_frogs.m_scale[rChar.m_frogBelly] = 1.0f + 0.2f * breath_cycle(rChar.m_soul.m_breathCycle);
 
     glm::vec3 avgPos{0.0f};
     float totalMass = 0.0f;
@@ -503,7 +548,6 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
     //reinterpret_cast<glm::vec3&>(rScene.m_camera.target) =  avgPos;
     //reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
 
-
     BeginDrawing();
 
 
@@ -517,8 +561,19 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
             ClearBackground(Color{ 0, 0, 0, 0 });
 
             int const g = 128;
-            int gx = int(t * 2) % 8;
-            int gy = 1;
+            int gx;
+            int gy;
+
+            // blink for 5 frames
+            if (rChar.m_soul.m_blinkCdn < 5.0f/60.0f)
+            {
+                gx = 0; gy = 2;
+            }
+            else
+            {
+                gx = 0; gy = 1;
+            }
+
             float ox = gx * g;
             float oy = gy * g * 2;
             float wy = oy + g;
@@ -691,7 +746,7 @@ SceneFunc_t gen_test_scene_c()
     //image, image_idx, err, warn, 0, 0, &img.at(0),
     //static_cast<int>(img.size()), load_image_user_data);
 
-    loader.LoadASCIIFromFile(&rScene.m_gltf, &err, &warn, "salad0.gltf");
+    loader.LoadASCIIFromFile(&rScene.m_gltf, &err, &warn, "resources/gltf/salad0.gltf");
 
     // funny patch LOL!!!
     for (auto &rNode : rScene.m_gltf.nodes)

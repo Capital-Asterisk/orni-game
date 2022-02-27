@@ -83,6 +83,16 @@ struct WetJoints : meshdeform::Joints
 };
 
 
+struct Soul
+{
+    float m_blinkPeriodAvg{6.0f};
+    float m_blinkPeriodMargin{2.0f};
+    float m_blinkCdn{0.0f};
+
+    float m_breathSpeed{0.35f};
+    float m_breathCycle{0.0f};
+};
+
 struct CharB
 {
     struct Eye
@@ -91,6 +101,7 @@ struct CharB
         glm::ivec2          m_irisPos;
     };
 
+    Soul                    m_soul;
 
     Material                m_eyeMaterial;
     Texture                 m_eyeSheet;
@@ -98,9 +109,14 @@ struct CharB
     Eye                     m_eyeL;
     Eye                     m_eyeR;
 
+    std::vector<std::string> m_jointNames;
     meshdeform::Joints      m_joints;
     WetJoints               m_wetJoints;
     Apples                  m_apples;
+
+    frog_id_t               m_frogBelly;
+    frog_id_t               m_frogBeak;
+    frog_id_t               m_frogHead;
 };
 
 using Characters_t = std::unordered_map<int, CharB>;
