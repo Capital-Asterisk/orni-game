@@ -70,7 +70,8 @@ struct FrogDyn
         glm::quat m_origin{};
 
         float m_strengthMul{1.0f};
-        float m_forceLim{10000.0f};
+        float m_forceLim{1000000.0f};
+        float m_angDrag{0.0f};
 
         float m_twistRange;
         float m_twistSpring;
@@ -109,7 +110,8 @@ struct FrogDyn
 
     //std::vector<Ball> m_ballData;
 
-    std::vector<Bait> m_baits;
+    std::vector<Bait>       m_baits;
+    int                     m_baitNextId{420}; // IdRegistry's stupid cousin
 };
 
 

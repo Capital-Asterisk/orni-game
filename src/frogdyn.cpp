@@ -138,9 +138,17 @@ void frogdyn::apply_baits(FrogDyn &rDyn, BaitOptions opt, float delta)
             angImpB += (-angle * opt.m_alignP + swaySpd * opt.m_alignD) * axis * minMass;
         }
 
+        if (rBait.m_angDrag > 0.0f)
+        {
+            glm::vec3 const drag = (velB.m_ang - velA.m_ang) * delta * rBait.m_angDrag;
+
+            angImpB -= drag;
+            angImpA += drag;
+        }
+
 
         glm::vec3 const     normalLinImp = limit_length((posRel * opt.m_linP + velRel * opt.m_linD) * minMass, rBait.m_forceLim * delta);
-        glm::vec3 const     normalAngImp = normalLinImp;
+        glm::vec3 const     normalAngImp = normalLinImp / 0.5f; // arbitrary moment of inertia for all
 
         if (! worldA)
         {

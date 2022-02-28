@@ -35,6 +35,8 @@ extern "C"
 namespace orni
 {
 
+
+
 struct MainGameScene : ThreadedLoop
 {
     ~MainGameScene()
@@ -80,6 +82,9 @@ struct MainGameScene : ThreadedLoop
 
     Inputs                  m_inputs;
     ToolGrab                m_toolGrab;
+    ToolGrabRotater         m_toolGrabRotate;
+    std::vector<GrabDisplay> m_toolGrabDisplay;
+    bool                    m_mouseMoved;
 
     tinygltf::Model         m_gltf;
     std::vector<Image>      m_gltfRayImage;
@@ -100,21 +105,18 @@ struct MainGameScene : ThreadedLoop
     float                   m_extPercent = 0.5f;
 
     float                   m_camDist{3.0f};
-    float                   m_camYaw{0.0f};
+    float                   m_camYaw{0.78539f};
     float                   m_camPitch{0.0f};
     float                   m_time{0.0f};
-    bool                    m_gravity{false};
+    bool                    m_gravity{true};
 };
 
 static void update_scene(MainGameScene &rScene, GameState &rGame)
 {
-    auto &t = rScene.m_time;
 
-    float delta = 1.0f / 60.0f;//GetFrameTime();
+    float const delta = 1.0f / 60.0f;
+    CharB &rChar = rScene.m_characters.begin()->second;
 
-    //rScene.m_camYaw += (float(IsKeyDown(KEY_RIGHT)) - float(IsKeyDown(KEY_LEFT))) * delta * 3.14159f;
-    //rScene.m_camPitch += (float(IsKeyDown(KEY_UP)) - float(IsKeyDown(KEY_DOWN))) * delta * 3.14159f;
-    //rScene.m_camDist += (float(IsKeyDown(KEY_Z)) - float(IsKeyDown(KEY_X))) * delta * 2.0f;
     if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT))
     {
         Vector2 const mouseDelta = GetMouseDelta();
@@ -130,9 +132,51 @@ static void update_scene(MainGameScene &rScene, GameState &rGame)
         rScene.m_camDist = glm::clamp(rScene.m_camDist - rScene.m_camDist * GetMouseWheelMove() * sensitivity, 1.0f, 12.0f );
     }
 
-    reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
+    if (IsKeyPressed(KEY_ONE))
+    {
+        rScene.m_inputs.m_selected = 0;
+    }
+    else if (IsKeyPressed(KEY_TWO))
+    {
+        rScene.m_inputs.m_selected = 1;
+    }
 
-    CharB &rChar = rScene.m_characters.begin()->second;
+    glm::vec3 avgPos{0.0f};
+    float totalMass = 0.0f;
+    // draw frogs
+    for (frog_id_t id = 0; id < rScene.m_frogs.m_ids.capacity(); id ++)
+    {
+        if (!rScene.m_frogs.m_ids.exists(id))
+        {
+            continue;
+        }
+        avgPos += glm::vec3(rScene.m_frogs.m_tf[id][3]) * rScene.m_frogs.m_mass[id];
+        totalMass += rScene.m_frogs.m_mass[id];
+    }
+
+    avgPos /= totalMass;
+
+    glm::vec3 &rCamPos = reinterpret_cast<glm::vec3&>(rScene.m_camera.position);
+    glm::vec3 &rCamTgt = reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
+    glm::vec3 const diff = avgPos + rScene.m_cameraOffset - rCamTgt;
+    // smoothly move camera to center of mass
+
+    //rCamPos += diff * 0.5f;
+    rCamTgt += diff * 0.01f;
+
+    rCamPos = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + rCamTgt;
+
+    update_inputs_rl(rScene.m_camera, rScene.m_inputs);
+
+    rScene.m_inputs.m_lazor.m_salad = -1;
+    if (update_tool_grab(rScene.m_salads, rChar.m_wetJoints, rScene.m_frogs, rScene.m_inputs, rScene.m_toolGrab))
+    { }
+    else if (update_tool_grab_rotate(rScene.m_toolGrabRotate, rScene.m_toolGrab, rScene.m_inputs, rScene.m_frogs, rScene.m_camera, delta))
+    { }
+    else if (offset_camera_lazor(rScene.m_salads, rScene.m_inputs, rScene.m_mouseMoved, rScene.m_cameraOffset, avgPos))
+    { }
+    update_tool_grab_pos(rScene.m_camera, rScene.m_inputs, rScene.m_frogs, rScene.m_toolGrab, delta);
+
 
     update_apples(rChar.m_apples, rChar.m_joints);
 
@@ -146,10 +190,6 @@ static void update_scene(MainGameScene &rScene, GameState &rGame)
                 0.0f,
                 glm::cos(rScene.m_camYaw + 1.5708f)} * pushMag;
 
-    update_inputs_rl(rScene.m_camera, rScene.m_inputs);
-    rScene.m_inputs.m_selected = 0;
-    rScene.m_inputs.m_lazor.m_salad = -1;
-    update_tool_grab(rScene.m_salads, rChar.m_wetJoints, rScene.m_frogs, rScene.m_inputs, rScene.m_toolGrab);
 
     if (IsKeyPressed(KEY_G))
     {
@@ -183,7 +223,7 @@ static void update_scene(MainGameScene &rScene, GameState &rGame)
     {
         float smldelta = delta * cstPercent / float(rScene.m_cstSteps);
 
-        apply_baits(rScene.m_frogs, {64.0f, 0.3f, 16.0f, 0.5f, 8.0f, 0.2f, 8.0f, 0.25f}, smldelta);
+        apply_baits(rScene.m_frogs, {64.0f, 0.25f, 16.0f, 0.5f, 8.0f, 0.2f, 8.0f, 0.25f}, smldelta);
 
         // beak-head spring workaround
         glm::vec3 const axis = rScene.m_frogs.m_tf[rChar.m_frogBeak][0];
@@ -203,8 +243,8 @@ static void update_scene(MainGameScene &rScene, GameState &rGame)
     // apply drag
     for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
     {
-        rScene.m_frogs.m_vel[i].m_ang = frogdyn::oppose(rScene.m_frogs.m_vel[i].m_ang, delta * 1.0f);
-        rScene.m_frogs.m_vel[i].m_lin = frogdyn::oppose(rScene.m_frogs.m_vel[i].m_lin, delta * 2.0f);
+        rScene.m_frogs.m_vel[i].m_ang = frogdyn::oppose(rScene.m_frogs.m_vel[i].m_ang, delta * 0.2f);
+        rScene.m_frogs.m_vel[i].m_lin = frogdyn::oppose(rScene.m_frogs.m_vel[i].m_lin, delta * 0.2f);
         //rScene.m_frogs.m_vel[i].m_lin *= 0.998f;
     }
 
@@ -238,30 +278,7 @@ static void update_scene(MainGameScene &rScene, GameState &rGame)
     update_expressions(rChar.m_soul, delta);
 
     // breathing
-    rScene.m_frogs.m_scale[rChar.m_frogBelly] = 1.0f + 0.2f * breath_cycle(rChar.m_soul.m_breathCycle);
-
-    glm::vec3 avgPos{0.0f};
-    float totalMass = 0.0f;
-    // draw frogs
-    for (frog_id_t id = 0; id < rScene.m_frogs.m_ids.capacity(); id ++)
-    {
-        if (!rScene.m_frogs.m_ids.exists(id))
-        {
-            continue;
-        }
-        avgPos += glm::vec3(rScene.m_frogs.m_tf[id][3]) * rScene.m_frogs.m_mass[id];
-        totalMass += rScene.m_frogs.m_mass[id];
-    }
-
-    avgPos /= totalMass;
-
-    glm::vec3 const camPos = reinterpret_cast<glm::vec3&>(rScene.m_camera.position);
-    glm::vec3 const diff = avgPos - camPos;
-    // smoothly move camera to center of mass
-
-    //reinterpret_cast<glm::vec3&>(rScene.m_camera.target) =  avgPos;
-    //reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
-
+    rScene.m_frogs.m_scale[rChar.m_frogBelly] = 1.0f + 0.1f * breath_cycle(rChar.m_soul.m_breathCycle);
 }
 
 static void update_scene_loop(MainGameScene &rScene, GameState &rGame)
@@ -307,11 +324,15 @@ static void draw_scene(MainGameScene &rScene, GameState &rGame, float threading)
     CharB const &rChar = rScene.m_characters.begin()->second;
     glm::vec2 const eyePosR = rChar.m_eyeR.m_texturePos;
     glm::vec2 const eyePosL = rChar.m_eyeL.m_texturePos;
+    Inputs const inputs = rScene.m_inputs;
+    Camera const cam = rScene.m_camera;
 
     SetShaderValue(rScene.m_shaderLit, rScene.m_shaderLit.locs[SHADER_LOC_VECTOR_VIEW], &rScene.m_camera.position.x, SHADER_UNIFORM_VEC3);
     UpdateLightValues(rScene.m_shaderLit, rScene.m_lights[0]);
     UpdateLightValues(rScene.m_shaderLit, rScene.m_lights[1]);
     UpdateLightValues(rScene.m_shaderLit, rScene.m_lights[2]);
+
+    update_grab_displays(rScene.m_toolGrab, rScene.m_frogs, rScene.m_toolGrabDisplay);
 
     for (int i = 0; i < 4; i ++)
     {
@@ -351,7 +372,7 @@ static void draw_scene(MainGameScene &rScene, GameState &rGame, float threading)
             }
             else
             {
-                gx = 0; gy = 1;
+                gx = 4; gy = 1;
             }
 
             float ox = gx * g;
@@ -366,8 +387,8 @@ static void draw_scene(MainGameScene &rScene, GameState &rGame, float threading)
             DrawTexturePro(rChar.m_eyeSheet, {ox, wy, g, -g}, rectL, {}, 0.0f, WHITE);
 
             // irises
-            draw_iris(rChar.m_eyeSheet, 0, rChar.m_eyeR.m_texturePos);
-            draw_iris(rChar.m_eyeSheet, 1, rChar.m_eyeL.m_texturePos);
+            draw_iris(rChar.m_eyeSheet, 0, eyePosR);
+            draw_iris(rChar.m_eyeSheet, 1, eyePosL);
 
             // erase overlap
             BeginBlendMode(BLEND_CUSTOM);
@@ -381,9 +402,9 @@ static void draw_scene(MainGameScene &rScene, GameState &rGame, float threading)
             DrawTexturePro(rChar.m_eyeSheet, {ox, oy, g, -g}, rectL, {}, 0.0f, WHITE);
         EndTextureMode();
 
-        BeginMode3D(rScene.m_camera);
+        BeginMode3D(cam);
             BeginBlendMode(BLEND_ALPHA);
-                DrawGrid(10, 1.0f);
+                DrawGrid(20, 1.0f);
 
                 rlDisableBackfaceCulling();
                 DrawModel(rScene.m_salads[0]->m_rayModel, Vector3{0.0f, 0.0f, 0.0f}, 1.0f, WHITE);
@@ -400,10 +421,34 @@ static void draw_scene(MainGameScene &rScene, GameState &rGame, float threading)
         BeginTextureMode(rScene.m_ui);
             ClearBackground(Color{ 0, 0, 0, 0 });
 
+            BeginBlendMode(BLEND_ALPHA);
 
-            BeginMode3D(rScene.m_camera);
+            for (GrabDisplay const& grab : rScene.m_toolGrabDisplay)
+            {
+                if (grab.m_visible)
+                {
+                    unsigned char alpha = glm::clamp(350.0f - glm::distance(grab.m_screenPos, inputs.m_mousePos) * 0.5f, 100.0f, 220.0f);
+                    Color color = grab.m_selected ? Color{100, 255, 100, alpha} : Color{255, 255, 255, alpha};
+                    DrawCircle(grab.m_screenPos.x, grab.m_screenPos.y, ToolGrab::smc_radius, color);
+                    DrawCircleLines(grab.m_screenPos.x, grab.m_screenPos.y, ToolGrab::smc_radius, color);
+                }
+                //DrawSphereWires(reinterpret_cast<Vector3 const&>(grab.m_pos), 0.1, 5, 6, Color{255, 255, 255, 255});
+            }
+
+            EndBlendMode();
+
+            BeginMode3D(cam);
+
+
 
 #if 0
+                // wait first to avoid race condition when reading frogs
+                if (threading)
+                {
+                    std::unique_lock<std::mutex> lock(rScene.m_syncFramesMtx);
+                    rScene.m_syncFramesCv.wait(lock, [&rScene]  { return rScene.m_framesRendered < rScene.m_framesUpdated; }  );
+                }
+
                 // draw frogs
                 for (frog_id_t id = 0; id < rScene.m_frogs.m_ids.capacity(); id ++)
                 {
@@ -471,19 +516,6 @@ static void draw_scene(MainGameScene &rScene, GameState &rGame, float threading)
 
             DrawTextEx(*rGame.m_pFont, "Sample Text", Vector2{10.0, 100.0}, 20, 0, WHITE);
 
-            DrawRectangle(10, 10, 50, 25, Color{255, 255, 255, 255});
-
-            DrawRectangle(10, 35, 50, 25, Color{203, 194, 201, 255});
-
-            //DrawTexture(rChar.m_eyeTexture.texture, 0, 0, WHITE);
-
-            BeginBlendMode(BLEND_CUSTOM);
-            rlSetBlendFactors(0, 770, 32774);
-
-                DrawRectangle(30, 20, 50, 50, Color{255, 0, 0, 100});
-
-            EndBlendMode();
-
         EndTextureMode();
 
         auto &rTex = rScene.m_ui.texture;
@@ -502,6 +534,8 @@ SceneFunc_t gen_the_game_scene(GameState &rGame)
     tinygltf::TinyGLTF loader;
 
     rScene.m_toolGrab.m_id = 0;
+    rScene.m_toolGrabRotate.m_id = 1;
+    rScene.m_inputs.m_selected = 0;
 
     rScene.m_gltfRayImage.resize(10);
     loader.SetImageLoader([] (
@@ -612,10 +646,41 @@ SceneFunc_t gen_the_game_scene(GameState &rGame)
     rScene.m_ui = LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
 
 
-    rScene.m_camera.target = Vector3{ 0.0f, 1.5156f, -0.033483f };
+    rScene.m_camera.target = Vector3{ 0.0f, 6.9f, 0.0f };
+    rScene.m_camera.position = Vector3{ 0.0f, 6.9f, 2.0f };
     rScene.m_camera.up = Vector3{ 0.0f, 1.0f, 0.0f };
     rScene.m_camera.fovy = 40.0f;
     rScene.m_camera.projection = CAMERA_PERSPECTIVE;
+
+    // setup default pose
+
+    for (frog_id_t id = 0; id < rScene.m_frogs.m_ids.capacity(); id ++)
+    {
+        if (!rScene.m_frogs.m_ids.exists(id))
+        {
+            continue;
+        }
+        rScene.m_frogs.m_tf[id][3] += glm::vec4(0.0f, 6.9f, 0.0f, 0.0f);
+    }
+
+    ToolGrab::Grab &rGrab = rScene.m_toolGrab.m_grabs.emplace_back();
+    frog_id_t const frog = rScene.m_characters.begin()->second.m_frogTailTip;
+
+    glm::vec3 const down{0.0f, -1.0f, 0.0f};
+    glm::vec3 const fwd{0.0f, 0.0f, 1.0f};
+    glm::vec3 const hit = rScene.m_frogs.m_tf[frog][3];
+    rGrab.baitId = rScene.m_frogs.m_baitNextId++;
+
+    FrogDyn::Bait &rBait = rScene.m_frogs.m_baits.emplace_back(
+                FrogDyn::Bait{ {-1,  hit, down, fwd},
+                               {frog, {0.0f, 0.0f, 0.0f}, down, fwd} });
+    rBait.m_id = rGrab.baitId;
+    if (g_limits)
+    {
+        rBait.m_forceLim = 15.2f * 10.0f * 4.0f;
+    }
+
+    // Start!
 
     float multithread = true;
 

@@ -165,8 +165,8 @@ static void update_scene(TestSceneC &rScene, GameState &rGame)
 
     if (IsKeyDown(KEY_F))
     {
-//        rScene.m_frogs.m_scale[14] += 0.05f;
-//        rScene.m_frogs.m_mass[14] += 0.02f;
+        rScene.m_frogs.m_scale[14] += 0.05f;
+        rScene.m_frogs.m_mass[14] += 0.005f;
     }
 
     if (IsKeyDown(KEY_LEFT_ALT))
@@ -252,7 +252,7 @@ static void update_scene(TestSceneC &rScene, GameState &rGame)
     update_expressions(rChar.m_soul, delta);
 
     // breathing
-    rScene.m_frogs.m_scale[rChar.m_frogBelly] = 1.0f + 0.2f * breath_cycle(rChar.m_soul.m_breathCycle);
+    //rScene.m_frogs.m_scale[rChar.m_frogBelly] = 1.0f + 0.2f * breath_cycle(rChar.m_soul.m_breathCycle);
 
     glm::vec3 avgPos{0.0f};
     float totalMass = 0.0f;
@@ -482,7 +482,7 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
             EndMode3D();
 
             std::ostringstream readouts;
-            readouts << "[Arrow Keys]: Rotate camera\n[Mouse]: Drag\n[Space]: Lock Constrain\n[A/D]: Apply force\n[Z/X]: Zoom\n[R]: SPEEENN\n[Alt]: Kill angular velocity\n"
+            readouts << "[Arrow Keys]: Rotate camera\n[Mouse]: Drag\n[Space]: Lock Constrain\n[A/D]: Apply force\n[Z/X]: Zoom\n[R]: SPEEENN\n[F]: Feed\n[Alt]: Kill angular velocity\n"
                      << "[G]: Toggle Gravity " << (rScene.m_gravity ? std::string_view("(ON)") : std::string_view("(OFF)"))
                      << "\n[E] Toggle Force Limiters " << (g_limits ? std::string_view("(ON)") : std::string_view("(OFF!!!)")) << "\n";
 

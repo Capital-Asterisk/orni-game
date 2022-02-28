@@ -3,6 +3,7 @@
 #include <glm/gtx/transform.hpp>
 #include <glm/gtx/intersect.hpp>
 #include <glm/gtx/vector_angle.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include <raymath.h>
 
@@ -11,14 +12,15 @@
 namespace orni
 {
 
-void update_tool_grab(
+bool update_tool_grab(
         Salads_t const& salads,
         WetJoints const& wet,
         FrogDyn& rFrogs,
         Inputs& rInputs,
         ToolGrab& rToolGrab)
 {
-    bool const selected = rInputs.m_selected == rToolGrab.m_id;
+    bool const toolSelected = rInputs.m_selected == rToolGrab.m_id;
+    bool clickedSomething = false;
 
     if (rToolGrab.m_active)
     {
@@ -26,67 +28,97 @@ void update_tool_grab(
         {
             // release
             rToolGrab.m_active = false;
-            int id = rToolGrab.m_grabs.back().baitId;
-            rToolGrab.m_grabs.pop_back();
-            auto found = std::find_if(rFrogs.m_baits.begin(), rFrogs.m_baits.end(), [id] (FrogDyn::Bait const& bait) { return bait.m_id == id; });
-
-            rFrogs.m_baits.erase(found);
+            if (rToolGrab.m_removeOnRelease)
+            {
+                int id = rToolGrab.m_grabs.back().baitId;
+                rToolGrab.m_grabs.pop_back();
+                auto found = std::find_if(rFrogs.m_baits.begin(), rFrogs.m_baits.end(), [id] (FrogDyn::Bait const& bait) { return bait.m_id == id; });
+                rFrogs.m_baits.erase(found);
+                clickedSomething = true;
+            }
         }
         else if (IsKeyPressed(KEY_SPACE))
         {
             rToolGrab.m_active = false;
         }
     }
-    else if (selected && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+    else if (toolSelected && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && (rToolGrab.m_selected != -1))
+    {
+        if (!g_limits || rToolGrab.m_grabs.size() != 1)
+        {
+            // copy paste other parts of code for remove!
+            std::iter_swap(rToolGrab.m_grabs.begin() + rToolGrab.m_selected, rToolGrab.m_grabs.end() - 1);
+            int id = rToolGrab.m_grabs.back().baitId;
+            rToolGrab.m_grabs.pop_back();
+            auto found = std::find_if(rFrogs.m_baits.begin(), rFrogs.m_baits.end(), [id] (FrogDyn::Bait const& bait) { return bait.m_id == id; });
+            rFrogs.m_baits.erase(found);
+            clickedSomething = true;
+        }
+    }
+    else if (toolSelected && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
     {
         // do grab
-        if (rInputs.m_lazor.m_salad == -1)
+        if (rToolGrab.m_selected != -1)
         {
-            rInputs.m_lazor = lazor_salads(rInputs.m_mouseOrig, rInputs.m_mouseDir, salads);
+            // something selected, drag it
+            std::iter_swap(rToolGrab.m_grabs.begin() + rToolGrab.m_selected, rToolGrab.m_grabs.end() - 1);
+            rToolGrab.m_active = true;
+            rToolGrab.m_removeOnRelease = false;
+            clickedSomething = true;
         }
-
-        if (rInputs.m_lazor.m_salad != -1)
+        else
         {
-            SaladModel const&               salad       = *salads.at(rInputs.m_lazor.m_salad);
-
-            //std::cout << "Connected joint: " << int(cntJoints[top]) << "\n";
-
-            // get joint, then linear search for connected frog
-            int const joint = paw_default_base_attribute(salad.m_spookM, &salad.m_rayMesh.indices[rInputs.m_lazor.m_mcray.m_index * 3]);
-
-            auto foundIt = std::find_if(
-                        wet.m_hoppers.begin(), wet.m_hoppers.end(),
-                        [joint] (WetJoints::Hopper const& hopper)
+            if (rInputs.m_lazor.m_salad == -1)
             {
-                return hopper.m_joint == joint;
-            });
+                rInputs.m_lazor = lazor_salads(rInputs.m_mouseOrig, rInputs.m_mouseDir, salads);
+            }
 
-            if (foundIt != wet.m_hoppers.end())
+            if (rInputs.m_lazor.m_salad != -1)
             {
-                ToolGrab::Grab &rGrab = rToolGrab.m_grabs.emplace_back();
+                SaladModel const& salad = *salads.at(rInputs.m_lazor.m_salad);
 
-                frog_id_t const frog = foundIt->m_frog;
+                //std::cout << "Connected joint: " << int(cntJoints[top]) << "\n";
 
-                // add bait
-                glm::vec3 const down{0.0f, -1.0f, 0.0f};
-                glm::vec3 const fwd{0.0f, 0.0f, 1.0f};
-                glm::vec3 const lazorHit = rInputs.m_mouseOrig + rInputs.m_mouseDir * rInputs.m_lazor.m_mcray.m_dist;
-                glm::vec3 const frogInvHit = glm::inverse(rFrogs.m_tf[frog]) * glm::vec4(lazorHit, 1.0f);
+                // get joint, then linear search for connected frog
+                int const joint = paw_default_base_attribute(salad.m_spookM, &salad.m_rayMesh.indices[rInputs.m_lazor.m_mcray.m_index * 3]);
 
-                rToolGrab.m_active = true;
-                rGrab.baitId = 420 + rToolGrab.m_grabs.size();
-
-                FrogDyn::Bait &rBait = rFrogs.m_baits.emplace_back(
-                            FrogDyn::Bait{ {-1,  lazorHit, down, fwd},
-                                           {frog,   frogInvHit, down, fwd} });
-                rBait.m_id = rGrab.baitId;
-                if (g_limits)
+                auto foundIt = std::find_if(
+                            wet.m_hoppers.begin(), wet.m_hoppers.end(),
+                            [joint] (WetJoints::Hopper const& hopper)
                 {
-                    rBait.m_forceLim = 15.2f * 10.0f * 3.0f;
-                }
-                //rBait.m_strengthMul = 0.2f;
+                    return hopper.m_joint == joint;
+                });
 
-                //rFrogs.m_extImp[frog].m_lin += rInputs.m_mouseDir * 10.0f;
+                if (foundIt != wet.m_hoppers.end())
+                {
+                    ToolGrab::Grab &rGrab = rToolGrab.m_grabs.emplace_back();
+
+                    frog_id_t const frog = foundIt->m_frog;
+
+                    // add bait
+                    glm::vec3 const down{0.0f, -1.0f, 0.0f};
+                    glm::vec3 const fwd{0.0f, 0.0f, 1.0f};
+                    glm::vec3 const lazorHit = rInputs.m_mouseOrig + rInputs.m_mouseDir * rInputs.m_lazor.m_mcray.m_dist;
+                    float const scale = rFrogs.m_scale[frog];
+                    glm::vec3 const frogInvHit = glm::inverse(rFrogs.m_tf[frog]) * glm::vec4(lazorHit, 1.0f);
+
+                    rToolGrab.m_active = true;
+                    rToolGrab.m_removeOnRelease = true;
+                    clickedSomething = true;
+                    rGrab.baitId = rFrogs.m_baitNextId++;
+
+                    FrogDyn::Bait &rBait = rFrogs.m_baits.emplace_back(
+                                FrogDyn::Bait{ {-1,  lazorHit, down, fwd},
+                                               {frog,   frogInvHit / scale, down, fwd} });
+                    rBait.m_id = rGrab.baitId;
+                    if (g_limits)
+                    {
+                        rBait.m_forceLim = 15.2f * 10.0f * 4.0f;
+                    }
+                    //rBait.m_strengthMul = 0.2f;
+
+                    //rFrogs.m_extImp[frog].m_lin += rInputs.m_mouseDir * 10.0f;
+                }
             }
         }
     }
@@ -111,8 +143,138 @@ void update_tool_grab(
              break;
          }
      }
+
+    return clickedSomething;
 }
 
+
+void update_tool_grab_pos(
+        Camera const& cam,
+        Inputs const& inputs,
+        FrogDyn& rFrogs,
+        ToolGrab& rToolGrab,
+        float delta)
+{
+    glm::vec3 camPos = reinterpret_cast<glm::vec3 const&>(cam.position);
+    glm::vec3 camDir = glm::normalize(reinterpret_cast<glm::vec3 const&>(cam.target) - camPos);
+
+    int selected = -1;
+    for (int i = 0; i < rToolGrab.m_grabs.size(); ++i)
+    {
+        ToolGrab::Grab &rGrab = rToolGrab.m_grabs[i];
+        // yes this is O(n*m) with questionable cache locality
+        // still faster than python lol
+        for (FrogDyn::Bait const &bait : rFrogs.m_baits)
+        {
+            if (bait.m_id == rGrab.baitId)
+            {
+                rGrab.m_pos = bait.m_a.m_offset;
+                break;
+            }
+        }
+
+        rGrab.m_visible = glm::dot(rGrab.m_pos - camPos, camDir) > 0.0f;
+        Vector2 pos = GetWorldToScreen(reinterpret_cast<Vector3&>(rGrab.m_pos), cam);
+        rGrab.m_screenPos = reinterpret_cast<glm::vec2&>(pos);
+
+        if (selected == -1 && rToolGrab.m_id == inputs.m_selected)
+        {
+            if (glm::distance(rGrab.m_screenPos, inputs.m_mousePos) < ToolGrab::smc_radius)
+            {
+                selected = i;
+            }
+        }
+
+        rGrab.m_cntUpLastTouched += delta;
+        rGrab.m_cntUpSelected += delta;
+    }
+    rToolGrab.m_selected = selected;
+}
+
+bool update_tool_grab_rotate(ToolGrabRotater rotate, ToolGrab& rToolGrab, Inputs& rInputs, FrogDyn& rFrogs, Camera const& cam, float delta)
+{
+    bool const toolSelected = rInputs.m_selected == rotate.m_id;
+
+    if (toolSelected && IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+    {
+        glm::vec3 const camPos = reinterpret_cast<glm::vec3 const&>(cam.position);
+        glm::vec3 const camTgt = reinterpret_cast<glm::vec3 const&>(cam.target);
+        glm::vec3 const camUp = reinterpret_cast<glm::vec3 const&>(cam.up);
+        glm::vec3 const camDir = glm::normalize(camTgt - camPos);
+        glm::vec3 const pitchAxis = glm::normalize(glm::cross(camDir, camUp));
+        glm::vec3 const yawAxis = glm::normalize(glm::cross(camDir, pitchAxis));
+
+        float const sensitivity = 0.25f;
+
+        Vector2 const mouseDelta = GetMouseDelta();
+        float pitch = mouseDelta.y * delta * sensitivity;
+        float yaw = -mouseDelta.x * delta * sensitivity;
+
+        glm::mat4x4 rotation = glm::rotate(pitch, pitchAxis) * glm::rotate(yaw, yawAxis);
+
+        for (ToolGrab::Grab &rGrab : rToolGrab.m_grabs)
+        {
+            // same thing here
+            for (FrogDyn::Bait &rBait : rFrogs.m_baits)
+            {
+                if (rBait.m_id == rGrab.baitId)
+                {
+                    rBait.m_a.m_offset = glm::vec3(rotation * glm::vec4(rBait.m_a.m_offset - camTgt, 1.0f)) + camTgt;
+                    break;
+                }
+            }
+        }
+        return true;
+    }
+
+    return false;
+}
+
+void update_grab_displays(ToolGrab const& grabs, FrogDyn const &frogs, std::vector<GrabDisplay> &rDisplay)
+{
+    int size = grabs.m_grabs.size();
+    rDisplay.resize(size);
+
+    for (int i = 0; i < size; i ++)
+    {
+        ToolGrab::Grab const& grab = grabs.m_grabs[i];
+        rDisplay[i] = {grab.m_screenPos, grab.m_cntUpLastTouched, grab.m_cntUpSelected, grab.m_visible, i == grabs.m_selected};
+    }
+}
+
+bool offset_camera_lazor(Salads_t const& salads, Inputs& rInputs, bool &rMouseMoved, glm::vec3 &rOffset, glm::vec3 com)
+{
+
+    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))
+    {
+        rMouseMoved = false;
+    }
+    if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT))
+    {
+        Vector2 mouseDelta = GetMouseDelta();
+        rMouseMoved |= (mouseDelta.x != 0.0f || mouseDelta.y != 0.0f);
+    }
+
+    if (IsMouseButtonReleased(MOUSE_BUTTON_RIGHT) && !rMouseMoved)
+    {
+        if (rInputs.m_lazor.m_salad == -1)
+        {
+            rInputs.m_lazor = lazor_salads(rInputs.m_mouseOrig, rInputs.m_mouseDir, salads);
+        }
+
+        if (rInputs.m_lazor.m_salad != -1)
+        {
+            glm::vec3 const lazorHit = rInputs.m_mouseOrig + rInputs.m_mouseDir * rInputs.m_lazor.m_mcray.m_dist;
+            rOffset = lazorHit - com;
+            return true;
+        }
+        else
+        {
+            rOffset = glm::vec3{0.0f};
+        }
+    }
+    return false;
+}
 
 int paw_default_base_attribute(meshdeform::MeshJoints const& joints, unsigned short const *pInd)
 {
@@ -269,6 +431,10 @@ void metal_rod(
             {
                 rChar.m_frogHead = frogId;
             }
+            else if (node.name == "tail3")
+            {
+                rChar.m_frogTailTip = frogId;
+            }
 
             // connect to parent
             if (level != 0)
@@ -290,6 +456,8 @@ void metal_rod(
 
                 rBait.m_a = {parentFrogId, glm::vec3{nodeTf[3]} + offset, parentTfInv * dir, parentTfInv * side};
                 rBait.m_b = {frogId, offset, frogTfInv * dir, frogTfInv * side};
+
+                rBait.m_angDrag = 3.0f;
 
                 if (tinygltf::Value const& patty = node.extras.Get("tlim"); patty.IsNumber())
                 {
@@ -365,10 +533,9 @@ void metal_rod(
     if (!balls.empty())
     {
         // balls contain pee
-        // TODO
-        //rFrogs.m_balls.emplace(frogId, balls.begin(), balls.end());
-        //rFrogs.m_ballPos.emplace(frogId, balls.size());
-        //rFrogs.m_canCollide.push_back(frogId);
+        rFrogs.m_balls.emplace(frogId, balls.begin(), balls.end());
+        rFrogs.m_ballPos.emplace(frogId, balls.size());
+        rFrogs.m_canCollide.push_back(frogId);
     }
 }
 

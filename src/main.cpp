@@ -26,23 +26,23 @@ void update_draw_frame()
     {
         // shorted
     }
-    else if (IsKeyDown(KEY_ONE))
+    else if (IsKeyPressed(KEY_ONE))
     {
         g_sceneFunc = orni::gen_test_scene_a();
     }
-    else if (IsKeyDown(KEY_TWO))
+    else if (IsKeyPressed(KEY_TWO))
     {
         g_sceneFunc = orni::gen_test_scene_b();
     }
-    else if (IsKeyDown(KEY_THREE))
+    else if (IsKeyPressed(KEY_THREE))
     {
         g_sceneFunc = orni::gen_test_scene_b_b();
     }
-    else if (IsKeyDown(KEY_FOUR))
+    else if (IsKeyPressed(KEY_FOUR))
     {
         g_sceneFunc = orni::gen_test_scene_c(g_gameState);
     }
-    else if (IsKeyDown(KEY_FIVE))
+    else if (IsKeyPressed(KEY_FIVE))
     {
         g_sceneFunc = orni::gen_the_game_scene(g_gameState);
     }
@@ -59,7 +59,7 @@ int main(int argc, char** argv)
     InitWindow(screenWidth, screenHeight, "Nice");
 
     // default resources
-    static Font defaultFont = LoadFontEx("resources/Tuffy-Bold.ttf", 20, 0, 0);
+    static Font defaultFont = LoadFontEx("resources/Tuffy-Bold.ttf", 24, 0, 0);
     SetTextureFilter(defaultFont.texture, TEXTURE_FILTER_BILINEAR);
     g_gameState.m_pFont = &defaultFont;
 

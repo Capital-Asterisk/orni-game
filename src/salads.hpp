@@ -133,6 +133,7 @@ struct CharB
     frog_id_t               m_frogBelly;
     frog_id_t               m_frogBeak;
     frog_id_t               m_frogHead;
+    frog_id_t               m_frogTailTip;
 };
 
 using Characters_t = std::unordered_map<int, CharB>;
@@ -179,6 +180,8 @@ struct Inputs
     McRaySalad              m_lazor;
 };
 
+using grab_id_t = int;
+
 struct ToolGrab
 {
     struct Grab
@@ -187,25 +190,67 @@ struct ToolGrab
         //int                 m_triangle;
         //glm::vec2           m_barypos;
         //glm::vec3           m_pullTo;
-        int baitId;
+        glm::vec3           m_pos;
+        glm::vec2           m_screenPos;
+        float               m_cntUpLastTouched;
+        float               m_cntUpSelected; // negative when not selected
+        int                 baitId;
+        bool                m_visible;
+        //bool                m_selected;
     };
+
+    static constexpr float smc_radius{12};
+
+    enum class FunnyMoments { None, Selected, Deselected };
 
     tool_id_t               m_id;
 
     std::vector<Grab>       m_grabs;
+    int                     m_selected{-1};
     bool                    m_active;
+    bool                    m_removeOnRelease;
+};
 
+struct GrabDisplay
+{
+    glm::vec2           m_screenPos;
+    float               m_cntUpLastTouched;
+    float               m_cntUpSelected;
+    bool                m_visible;
+    bool                m_selected;
+};
+
+struct ToolGrabRemover
+{
+    tool_id_t               m_id;
+};
+
+struct ToolGrabRotater
+{
+    tool_id_t               m_id;
 };
 
 inline bool g_limits{true};
 
-void update_tool_grab(
+bool update_tool_grab(
         Salads_t const& salads,
         WetJoints const& wet,
         FrogDyn& rFrogs,
         Inputs& rInputs,
         ToolGrab& rToolGrab);
 
+void update_tool_grab_pos(
+        Camera const& cam,
+        Inputs const& inputs,
+        FrogDyn& rFrogs,
+        ToolGrab& rToolGrab,
+        float delta);
+
+bool update_tool_grab_rotate(ToolGrabRotater rotate, ToolGrab& rToolGrab, Inputs& rInputs, FrogDyn& rFrogs, Camera const& cam, float delta);
+
+void update_grab_displays(ToolGrab const& grabs, FrogDyn const &frogs, std::vector<GrabDisplay> &rDisplay);
+
+bool offset_camera_lazor(Salads_t const& salads, Inputs& rInputs, bool &rMouseMoved, glm::vec3 &rOffset, glm::vec3 com);
 int paw_default_base_attribute(meshdeform::MeshJoints const& joints, unsigned short const *pInd);
 
 void update_expressions(Soul &rSoul, float delta);
