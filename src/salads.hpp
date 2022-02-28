@@ -100,6 +100,11 @@ struct WetJoints : meshdeform::Joints
 
 struct Soul
 {
+    float m_emPissed{0.0f};
+    float m_emWorry{0.0f};
+    float m_emBadIdea{0.0f};
+    float m_emShy{0.0f};
+
     float m_blinkPeriodAvg{6.0f};
     float m_blinkPeriodMargin{2.0f};
     float m_blinkCdn{0.0f};

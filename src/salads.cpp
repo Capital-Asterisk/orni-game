@@ -457,7 +457,7 @@ void metal_rod(
                 rBait.m_a = {parentFrogId, glm::vec3{nodeTf[3]} + offset, parentTfInv * dir, parentTfInv * side};
                 rBait.m_b = {frogId, offset, frogTfInv * dir, frogTfInv * side};
 
-                rBait.m_angDrag = 3.0f;
+                rBait.m_angDrag = 6.0f;
 
                 if (tinygltf::Value const& patty = node.extras.Get("tlim"); patty.IsNumber())
                 {
@@ -764,6 +764,13 @@ McRaySalad lazor_salads(glm::vec3 origin, glm::vec3 dir, Salads_t const& salads)
 void update_expressions(Soul &rSoul, float delta)
 {
     rSoul.m_blinkCdn -= delta;
+
+    float emRate = 0.05f;
+
+    rSoul.m_emWorry = glm::clamp(rSoul.m_emWorry - delta * emRate, 0.0f, 1.0f);
+    rSoul.m_emPissed = glm::clamp(rSoul.m_emPissed - delta * emRate, 0.0f, 1.0f);
+    rSoul.m_emShy = glm::clamp(rSoul.m_emShy - delta * emRate, 0.0f, 1.0f);
+    rSoul.m_emBadIdea = glm::clamp(rSoul.m_emBadIdea - delta * emRate, 0.0f, 1.0f);
 
     if (rSoul.m_blinkCdn <= 0.0f)
     {

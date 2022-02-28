@@ -26,6 +26,8 @@ extern "C"
 #include <iostream>
 #include <memory>
 #include <unordered_map>
+#include <sstream>
+#include <string_view>
 
 
 #if defined(PLATFORM_WEB)
@@ -111,6 +113,8 @@ struct MainGameScene : ThreadedLoop
     bool                    m_gravity{true};
 };
 
+inline bool g_printEmotions = false;
+
 static void update_scene(MainGameScene &rScene, GameState &rGame)
 {
 
@@ -130,6 +134,13 @@ static void update_scene(MainGameScene &rScene, GameState &rGame)
     {
         float const sensitivity = 0.2f;
         rScene.m_camDist = glm::clamp(rScene.m_camDist - rScene.m_camDist * GetMouseWheelMove() * sensitivity, 1.0f, 12.0f );
+    }
+
+    if (!IsKeyDown(KEY_LEFT_CONTROL))
+    { }
+    if (IsKeyPressed(KEY_E))
+    {
+        g_printEmotions = !g_printEmotions;
     }
 
     if (IsKeyPressed(KEY_ONE))
@@ -275,6 +286,8 @@ static void update_scene(MainGameScene &rScene, GameState &rGame)
 
     }
 
+    rChar.m_soul.m_emPissed += (glm::length(rScene.m_frogs.m_vel[rChar.m_frogHead].m_ang) > 4.0f) * 0.2f * delta;
+    rChar.m_soul.m_emWorry = glm::max(0.0f, rScene.m_toolGrab.m_grabs.size() - 7.0f) * 0.1f + rScene.m_toolGrab.m_grabs.size() * (!g_limits) * 0.25f;
     update_expressions(rChar.m_soul, delta);
 
     // breathing
@@ -322,10 +335,12 @@ static void draw_scene(MainGameScene &rScene, GameState &rGame, float threading)
     // acquire variables and upload stuff needed to render, this 'completes' rendering
 
     CharB const &rChar = rScene.m_characters.begin()->second;
+    Soul const soul = rChar.m_soul;
     glm::vec2 const eyePosR = rChar.m_eyeR.m_texturePos;
     glm::vec2 const eyePosL = rChar.m_eyeL.m_texturePos;
     Inputs const inputs = rScene.m_inputs;
     Camera const cam = rScene.m_camera;
+
 
     SetShaderValue(rScene.m_shaderLit, rScene.m_shaderLit.locs[SHADER_LOC_VECTOR_VIEW], &rScene.m_camera.position.x, SHADER_UNIFORM_VEC3);
     UpdateLightValues(rScene.m_shaderLit, rScene.m_lights[0]);
@@ -366,13 +381,28 @@ static void draw_scene(MainGameScene &rScene, GameState &rGame, float threading)
             int gy;
 
             // blink for 5 frames
-            if (rChar.m_soul.m_blinkCdn < 5.0f/60.0f)
+            if (soul.m_blinkCdn < 5.0f/60.0f)
             {
                 gx = 0; gy = 2;
             }
             else
             {
-                gx = 4; gy = 1;
+                if (soul.m_emWorry > 0.6f)
+                {
+                    gx = 4; gy = 1;
+                }
+                else if (soul.m_emWorry > 0.3f)
+                {
+                    gx = 3; gy = 1;
+                }
+                else if (soul.m_emPissed > 0.5f)
+                {
+                    gx = 1; gy = 1;
+                }
+                else
+                {
+                    gx = 0; gy = 1;
+                }
             }
 
             float ox = gx * g;
@@ -514,7 +544,17 @@ static void draw_scene(MainGameScene &rScene, GameState &rGame, float threading)
 #endif
             EndMode3D();
 
-            DrawTextEx(*rGame.m_pFont, "Sample Text", Vector2{10.0, 100.0}, 20, 0, WHITE);
+            std::ostringstream readouts;
+            readouts << "";
+            if (g_printEmotions)
+            {
+                readouts << "Pissed:  " << int(soul.m_emPissed * 100) << "/100\n";
+                readouts << "Worried: " << int(soul.m_emWorry * 100) << "/100\n";
+                readouts << "Shy:     " << int(soul.m_emShy * 100) << "/100\n";
+                readouts << "BadIdea: " << int(soul.m_emBadIdea * 100) << "/100\n";
+            }
+
+            DrawTextEx(*rGame.m_pFont, readouts.str().c_str(), Vector2{10.0, 100.0}, 20, 0, WHITE);
 
         EndTextureMode();
 
