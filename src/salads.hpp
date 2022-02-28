@@ -270,6 +270,8 @@ McRaySalad lazor_salads(glm::vec3 origin, glm::vec3 dir, Salads_t const& salads)
 
 void update_apples(Apples &rApples, meshdeform::Joints const& rJoints);
 
+void update_hoppers(std::vector<WetJoints::Hopper> const& hoppers, FrogDyn const& frogs, glm::mat4x4 *pNodeTf);
+
 glm::vec2 calc_eye_pos(glm::mat4x4 const& eyeTf, glm::vec3 tgt);
 
 bool eye_visible(glm::mat4x4 const& eyeTf, glm::vec3 tgt) noexcept;

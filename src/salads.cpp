@@ -365,9 +365,10 @@ void metal_rod(
     if (!balls.empty())
     {
         // balls contain pee
-        rFrogs.m_balls.emplace(frogId, balls.begin(), balls.end());
-        rFrogs.m_ballPos.emplace(frogId, balls.size());
-        rFrogs.m_canCollide.push_back(frogId);
+        // TODO
+        //rFrogs.m_balls.emplace(frogId, balls.begin(), balls.end());
+        //rFrogs.m_ballPos.emplace(frogId, balls.size());
+        //rFrogs.m_canCollide.push_back(frogId);
     }
 }
 
@@ -619,6 +620,17 @@ void update_apples(Apples &rApples, meshdeform::Joints const& rJoints)
 
         rApples.m_dataOut[id] = rJoints.m_nodeTf[apl.m_jointParent] * apl.m_tf;
     }
+}
+
+void update_hoppers(std::vector<WetJoints::Hopper> const& hoppers, FrogDyn const& frogs, glm::mat4x4 *pNodeTf)
+{
+    // Update hoppers
+    for (WetJoints::Hopper const& hopper : hoppers)
+    {
+        float const scale = frogs.m_scale[hopper.m_frog];
+        pNodeTf[hopper.m_joint] = glm::translate(frogs.m_tf.at(hopper.m_frog) * glm::scale(glm::vec3{scale, scale, scale}), glm::vec3{0, hopper.m_yoffset, 0});
+    }
+
 }
 
 // lol

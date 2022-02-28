@@ -448,7 +448,7 @@
                 "mass" : 0.5,
                 "tlim" : 0.0,
                 "clim" : 50.0,
-                "cspr" : 40.0,
+                "cspr" : 30.0,
                 "align" : "x"
             },
             "name" : "leg2_L",
@@ -477,7 +477,7 @@
                 "mass" : 0.7,
                 "tlim" : 0.0,
                 "clim" : 60.0,
-                "cspr" : 40.0,
+                "cspr" : 30.0,
                 "align" : "x"
             },
             "name" : "leg1_L",
@@ -684,7 +684,7 @@
                 "mass" : 0.5,
                 "tlim" : 0.0,
                 "clim" : 50.0,
-                "cspr" : 40.0,
+                "cspr" : 30.0,
                 "align" : "x"
             },
             "name" : "leg2_R",
@@ -713,7 +713,7 @@
                 "mass" : 0.7,
                 "tlim" : 0.0,
                 "clim" : 60.0,
-                "cspr" : 40.0,
+                "cspr" : 30.0,
                 "align" : "x"
             },
             "name" : "leg1_R",

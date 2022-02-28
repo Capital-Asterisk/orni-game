@@ -35,9 +35,9 @@ extern "C"
 namespace orni
 {
 
-struct TestSceneC : ThreadedLoop
+struct MainGameScene : ThreadedLoop
 {
-    ~TestSceneC()
+    ~MainGameScene()
     {
         m_running = false;
         m_syncFramesCv.notify_all();
@@ -87,6 +87,7 @@ struct TestSceneC : ThreadedLoop
     std::vector<Material>   m_gltfRayMaterials;
 
     Camera3D                m_camera;
+    glm::vec3               m_cameraOffset;
 
     Mesh                    m_cube;
     Material                m_mat;
@@ -95,7 +96,7 @@ struct TestSceneC : ThreadedLoop
 
     RenderTexture2D         m_ui;
 
-    int                     m_cstSteps = 15;
+    int                     m_cstSteps = 17;
     float                   m_extPercent = 0.5f;
 
     float                   m_camDist{3.0f};
@@ -105,15 +106,29 @@ struct TestSceneC : ThreadedLoop
     bool                    m_gravity{false};
 };
 
-static void update_scene(TestSceneC &rScene, GameState &rGame)
+static void update_scene(MainGameScene &rScene, GameState &rGame)
 {
     auto &t = rScene.m_time;
 
     float delta = 1.0f / 60.0f;//GetFrameTime();
 
-    rScene.m_camYaw += (float(IsKeyDown(KEY_RIGHT)) - float(IsKeyDown(KEY_LEFT))) * delta * 3.14159f;
-    rScene.m_camPitch += (float(IsKeyDown(KEY_UP)) - float(IsKeyDown(KEY_DOWN))) * delta * 3.14159f;
-    rScene.m_camDist += (float(IsKeyDown(KEY_Z)) - float(IsKeyDown(KEY_X))) * delta * 2.0f;
+    //rScene.m_camYaw += (float(IsKeyDown(KEY_RIGHT)) - float(IsKeyDown(KEY_LEFT))) * delta * 3.14159f;
+    //rScene.m_camPitch += (float(IsKeyDown(KEY_UP)) - float(IsKeyDown(KEY_DOWN))) * delta * 3.14159f;
+    //rScene.m_camDist += (float(IsKeyDown(KEY_Z)) - float(IsKeyDown(KEY_X))) * delta * 2.0f;
+    if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT))
+    {
+        Vector2 const mouseDelta = GetMouseDelta();
+        float const pi = glm::pi<float>();
+        float const sensitivity = 0.5f;
+
+        rScene.m_camPitch = glm::clamp(rScene.m_camPitch - mouseDelta.y * delta * sensitivity, -pi/2.1f, pi/2.1f) ;
+        rScene.m_camYaw = glm::mod(rScene.m_camYaw - mouseDelta.x * delta * sensitivity, pi * 2.0f) ;
+    }
+
+    {
+        float const sensitivity = 0.2f;
+        rScene.m_camDist = glm::clamp(rScene.m_camDist - rScene.m_camDist * GetMouseWheelMove() * sensitivity, 1.0f, 12.0f );
+    }
 
     reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
 
@@ -139,33 +154,6 @@ static void update_scene(TestSceneC &rScene, GameState &rGame)
     if (IsKeyPressed(KEY_G))
     {
         rScene.m_gravity = !rScene.m_gravity;
-    }
-
-    if (IsKeyPressed(KEY_E))
-    {
-        g_limits = !g_limits;
-    }
-
-    if (IsKeyDown(KEY_R))
-    {
-        for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
-        {
-            rScene.m_frogs.m_vel[i].m_ang.x += 0.5f;
-        }
-    }
-
-    if (IsKeyDown(KEY_T))
-    {
-        for (int i = 0; i < rScene.m_frogs.m_ids.size(); i ++)
-        {
-            rScene.m_frogs.m_vel[i].m_lin.y += 0.1f;
-        }
-    }
-
-    if (IsKeyDown(KEY_F))
-    {
-//        rScene.m_frogs.m_scale[14] += 0.05f;
-//        rScene.m_frogs.m_mass[14] += 0.02f;
     }
 
     if (IsKeyDown(KEY_LEFT_ALT))
@@ -220,12 +208,7 @@ static void update_scene(TestSceneC &rScene, GameState &rGame)
         //rScene.m_frogs.m_vel[i].m_lin *= 0.998f;
     }
 
-    // Update hoppers
-    for (WetJoints::Hopper const& hopper : rChar.m_wetJoints.m_hoppers)
-    {
-        float const scale = rScene.m_frogs.m_scale[hopper.m_frog];
-        rChar.m_joints.m_nodeTf.at(hopper.m_joint) = glm::translate(rScene.m_frogs.m_tf.at(hopper.m_frog) * glm::scale(glm::vec3{scale, scale, scale}), glm::vec3{0, hopper.m_yoffset, 0});
-    }
+    update_hoppers(rChar.m_wetJoints.m_hoppers, rScene.m_frogs, rChar.m_joints.m_nodeTf.data());
 
     meshdeform::calculate_joint_transforms(
             glm::mat4x4(1.0f),
@@ -272,12 +255,16 @@ static void update_scene(TestSceneC &rScene, GameState &rGame)
 
     avgPos /= totalMass;
 
-    reinterpret_cast<glm::vec3&>(rScene.m_camera.target) =  avgPos;
-    reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
+    glm::vec3 const camPos = reinterpret_cast<glm::vec3&>(rScene.m_camera.position);
+    glm::vec3 const diff = avgPos - camPos;
+    // smoothly move camera to center of mass
+
+    //reinterpret_cast<glm::vec3&>(rScene.m_camera.target) =  avgPos;
+    //reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
 
 }
 
-static void update_scene_loop(TestSceneC &rScene, GameState &rGame)
+static void update_scene_loop(MainGameScene &rScene, GameState &rGame)
 {
     while (rScene.m_running.load())
     {
@@ -306,9 +293,10 @@ static void update_scene_loop(TestSceneC &rScene, GameState &rGame)
     }
 }
 
-static void draw_scene(TestSceneC &rScene, GameState &rGame)
+static void draw_scene(MainGameScene &rScene, GameState &rGame, float threading)
 {
     // wait for new frame to be updated
+    if (threading)
     {
         std::unique_lock<std::mutex> lock(rScene.m_syncFramesMtx);
         rScene.m_syncFramesCv.wait(lock, [&rScene]  { return rScene.m_framesRendered < rScene.m_framesUpdated; }  );
@@ -331,11 +319,14 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
         rlUpdateVertexBuffer(rScene.m_salads[i]->m_rayMesh.vboId[2], rScene.m_salads[i]->m_rayMesh.normals, rScene.m_salads[i]->m_rayMesh.vertexCount*3*sizeof(float), 0);     // Update vertex normals
     }
 
+    if (threading)
     {
         std::unique_lock<std::mutex> lock(rScene.m_syncFramesMtx);
         ++rScene.m_framesRendered;
+        lock.unlock();
+        rScene.m_syncFramesCv.notify_all(); // update of next frame can resume
     }
-    rScene.m_syncFramesCv.notify_all(); // update of next frame can resume
+
 
     BeginDrawing();
 
@@ -421,7 +412,7 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
                         continue;
                     }
 
-                    auto tf = rScene.m_frogs.m_tf[id];
+                    auto const &tf = rScene.m_frogs.m_tf[id];
                     auto transposed = glm::transpose(tf);
 
                     auto tip = glm::vec3(tf[3] - tf[1] * 0.5f);
@@ -497,13 +488,13 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
 
         auto &rTex = rScene.m_ui.texture;
         DrawTextureRec(rTex, Rectangle{0.0f, 0.0f, float(rTex.width), -float(rTex.height) * 1.0f}, Vector2{0.0f, 0.0f}, Color{255, 255, 255, 255});
-    EndDrawing();
+        EndDrawing();
 }
 
 SceneFunc_t gen_the_game_scene(GameState &rGame)
 {
-    std::shared_ptr<TestSceneC> pScene = std::make_shared<TestSceneC>();
-    TestSceneC &rScene = *pScene;
+    std::shared_ptr<MainGameScene> pScene = std::make_shared<MainGameScene>();
+    MainGameScene &rScene = *pScene;
 
     std::string err;
     std::string warn;
@@ -626,15 +617,30 @@ SceneFunc_t gen_the_game_scene(GameState &rGame)
     rScene.m_camera.fovy = 40.0f;
     rScene.m_camera.projection = CAMERA_PERSPECTIVE;
 
-    rScene.m_running = true;
-    rScene.m_updater = std::thread(&update_scene_loop, std::ref(rScene), std::ref(rGame));
+    float multithread = true;
 
-    return [pScene = std::move(pScene)] (GameState &rGame) -> void
+    if (multithread)
     {
-        //update_scene(*pScene, rGame);
+        rScene.m_running = true;
+        rScene.m_updater = std::thread(&update_scene_loop, std::ref(rScene), std::ref(rGame));
 
-        draw_scene(*pScene, rGame);
-    };
+        return [pScene = std::move(pScene)] (GameState &rGame) -> void
+        {
+            draw_scene(*pScene, rGame, true);
+        };
+    }
+    else
+    {
+        rScene.m_running = true;
+
+        return [pScene = std::move(pScene)] (GameState &rGame) -> void
+        {
+            update_scene(*pScene, rGame);
+
+            draw_scene(*pScene, rGame, false);
+        };
+    }
+
 }
 
 } // namespace orni

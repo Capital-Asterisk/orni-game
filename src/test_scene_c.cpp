@@ -25,6 +25,8 @@ extern "C"
 #include <chrono>
 #include <iostream>
 #include <memory>
+#include <sstream>
+#include <string_view>
 #include <unordered_map>
 
 
@@ -69,8 +71,7 @@ struct TestSceneC : ThreadedLoop
             rlUnloadVertexArray(pSalad->m_rayMesh.vaoId);
         }
 
-
-        m_updater.join();
+        if (m_updater.joinable()) { m_updater.join(); }
     }
 
     Salads_t                m_salads;
@@ -95,7 +96,7 @@ struct TestSceneC : ThreadedLoop
 
     RenderTexture2D         m_ui;
 
-    int                     m_cstSteps = 15;
+    int                     m_cstSteps = 30;
     float                   m_extPercent = 0.5f;
 
     float                   m_camDist{3.0f};
@@ -221,11 +222,7 @@ static void update_scene(TestSceneC &rScene, GameState &rGame)
     }
 
     // Update hoppers
-    for (WetJoints::Hopper const& hopper : rChar.m_wetJoints.m_hoppers)
-    {
-        float const scale = rScene.m_frogs.m_scale[hopper.m_frog];
-        rChar.m_joints.m_nodeTf.at(hopper.m_joint) = glm::translate(rScene.m_frogs.m_tf.at(hopper.m_frog) * glm::scale(glm::vec3{scale, scale, scale}), glm::vec3{0, hopper.m_yoffset, 0});
-    }
+    update_hoppers(rChar.m_wetJoints.m_hoppers, rScene.m_frogs, rChar.m_joints.m_nodeTf.data());
 
     meshdeform::calculate_joint_transforms(
             glm::mat4x4(1.0f),
@@ -272,8 +269,8 @@ static void update_scene(TestSceneC &rScene, GameState &rGame)
 
     avgPos /= totalMass;
 
-    reinterpret_cast<glm::vec3&>(rScene.m_camera.target) =  avgPos;
-    reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
+    //reinterpret_cast<glm::vec3&>(rScene.m_camera.target) =  avgPos;
+    //reinterpret_cast<glm::vec3&>(rScene.m_camera.position) = glm::quat(glm::vec3{rScene.m_camPitch, rScene.m_camYaw, 0.0f}) * glm::vec3{0.0f, 0.0f, rScene.m_camDist} + reinterpret_cast<glm::vec3&>(rScene.m_camera.target);
 
 }
 
@@ -484,7 +481,12 @@ static void draw_scene(TestSceneC &rScene, GameState &rGame)
 #endif
             EndMode3D();
 
-            DrawTextEx(*rGame.m_pFont, "Sample Text", Vector2{10.0, 100.0}, 20, 0, WHITE);
+            std::ostringstream readouts;
+            readouts << "[Arrow Keys]: Rotate camera\n[Mouse]: Drag\n[Space]: Lock Constrain\n[A/D]: Apply force\n[Z/X]: Zoom\n[R]: SPEEENN\n[Alt]: Kill angular velocity\n"
+                     << "[G]: Toggle Gravity " << (rScene.m_gravity ? std::string_view("(ON)") : std::string_view("(OFF)"))
+                     << "\n[E] Toggle Force Limiters " << (g_limits ? std::string_view("(ON)") : std::string_view("(OFF!!!)")) << "\n";
+
+            DrawTextEx(*rGame.m_pFont, readouts.str().c_str(), Vector2{10.0, 100.0}, 20, 0, WHITE);
 
             DrawRectangle(10, 10, 50, 25, Color{255, 255, 255, 255});
 
